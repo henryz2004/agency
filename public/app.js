@@ -3,7 +3,7 @@
 // so the assumption sliders update everything instantly.
 
 import { initOffice, setAgents } from './render.js';
-import { drawHead, TIER } from './sprites.js';
+import { drawHead, colorFor } from './sprites.js';
 import { initSoundPref, toggleSound, updateSound } from './sound.js';
 import { initUI } from './ui.js';
 
@@ -68,21 +68,6 @@ function comma(n) {
 // ---- state ----------------------------------------------------------------
 
 let STATE = null;
-
-function tierOfModel(model) {
-  if (!model) return 'unknown';
-  const m = model.toLowerCase();
-  if (m.includes('opus') || m.includes('fable')) return 'opus';
-  if (m.includes('sonnet')) return 'sonnet';
-  if (m.includes('haiku')) return 'haiku';
-  if (m.includes('o3') || m.includes('o4') || m.includes('gpt-4') || m.includes('gemini-2.5-pro')) return 'opus';
-  if (m.includes('gpt-4o') || m.includes('gemini-2.5-flash') || m.includes('glm-5')) return 'sonnet';
-  if (m.includes('gpt-4o-mini') || m.includes('gemini-2.0-flash') || m.includes('glm-4')) return 'haiku';
-  if (m.includes('deepseek-r1') || m.includes('deepseek-v3')) return 'opus';
-  if (m.includes('deepseek-chat') || m.includes('llama-4')) return 'sonnet';
-  if (m.includes('llama-3') || m.includes('qwen') || m.includes('mistral')) return 'sonnet';
-  return 'unknown';
-}
 
 async function poll() {
   try {
@@ -246,7 +231,7 @@ requestAnimationFrame(payrollTick);
 
 function renderModels(usage) {
   const entries = Object.entries(usage.byModel || {})
-    .map(([m, v]) => ({ model: m, out: v.out, tier: tierOfModel(m) }))
+    .map(([m, v]) => ({ model: m, out: v.out }))
     .filter((e) => e.out > 0)
     .sort((a, b) => b.out - a.out);
   const total = entries.reduce((s, e) => s + e.out, 0) || 1;
@@ -257,7 +242,7 @@ function renderModels(usage) {
     const seg = document.createElement('div');
     seg.className = 'seg';
     seg.style.width = (100 * e.out) / total + '%';
-    seg.style.background = (TIER[e.tier] || TIER.unknown).screen;
+    seg.style.background = colorFor(e.model).screen;
     seg.title = `${e.model}: ${fmt(e.out)}`;
     bar.appendChild(seg);
   });
@@ -268,7 +253,7 @@ function renderModels(usage) {
     const item = document.createElement('div');
     item.className = 'legend-item';
     const pct = ((100 * e.out) / total).toFixed(0);
-    item.innerHTML = `<span class="swatch" style="background:${(TIER[e.tier] || TIER.unknown).screen}"></span>
+    item.innerHTML = `<span class="swatch" style="background:${colorFor(e.model).screen}"></span>
       <span class="lg-name">${shortModel(e.model)}</span><span class="lg-val">${pct}% · ${fmt(e.out)}</span>`;
     legend.appendChild(item);
   });
@@ -377,7 +362,7 @@ function renderTicker() {
   const { live, usage } = STATE;
   const items = [];
 for (const a of live.agents) {
-    const tl = (TIER[a.tier] || TIER.unknown).label;
+    const ml = a.model ? shortModel(a.model) : '?';
     const name = escapeHtml(a.name);
     const proj = escapeHtml(a.project);
     const labelText = a.task || a.chatName || a.lastPrompt;
@@ -387,7 +372,7 @@ for (const a of live.agents) {
     const sub = subN ? ` · 🤖 ${subN} subagent${subN > 1 ? 's' : ''}` : '';
     const src = a.source === 'opencode' ? ' 🟠' : '';
     if (a.activity === 'working') {
-      items.push(`🟢 <b>${name}</b>${src} (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${tl}${sub} · up ${up}`);
+      items.push(`🟢 <b>${name}</b>${src} (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${ml}${sub} · up ${up}`);
     } else if (a.activity === 'shell') {
       items.push(`⚙ <b>${name}</b>${src} running a command in <b>${proj}</b>${label ? ` — ${label}` : ''}${sub} · up ${up}`);
     } else if (a.state === 'done') {

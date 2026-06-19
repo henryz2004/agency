@@ -120,7 +120,7 @@ html, body {
 }
 .plate-row { display: flex; align-items: center; gap: 5px; justify-content: center; }
 .plate-name { font-size: 16px; color: var(--ink); line-height: 1; }
-.plate-tier { font-family: var(--pixel); font-size: 6px; letter-spacing: 1px; }
+.plate-tier { font-family: var(--pixel); font-size: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
 .plate-sub { font-size: 13px; color: var(--muted); line-height: 1.1; }
 .plate-sub .dept { color: var(--cyan); }
 .plate-up { font-size: 13px; color: var(--muted2); }

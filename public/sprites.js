@@ -5,13 +5,40 @@
 export const POD_W = 64;
 export const POD_H = 92;
 
-// Glow / accent color per model tier.
-export const TIER = {
-  opus: { screen: '#ffd166', glow: 'rgba(255,209,102,0.25)', code: '#fff0c0', label: 'OPUS' },
-  sonnet: { screen: '#5cd0ff', glow: 'rgba(92,208,255,0.25)', code: '#d0f4ff', label: 'SONNET' },
-  haiku: { screen: '#6cff9a', glow: 'rgba(108,255,154,0.22)', code: '#d6ffe2', label: 'HAIKU' },
-  unknown: { screen: '#b98cff', glow: 'rgba(185,140,255,0.22)', code: '#ecdcff', label: '—' },
+// Color palette per model — keyed by short slug. Falls back to a hash-derived
+// color for any model not listed here via `colorFor(model)`.
+export const MODEL_COLORS = {
+  'opus':   { screen: '#ffd166', glow: 'rgba(255,209,102,0.25)', code: '#fff0c0' },
+  'sonnet': { screen: '#5cd0ff', glow: 'rgba(92,208,255,0.25)', code: '#d0f4ff' },
+  'haiku':  { screen: '#6cff9a', glow: 'rgba(108,255,154,0.22)', code: '#d6ffe2' },
 };
+
+export function colorFor(model) {
+  if (!model) return MODEL_COLORS.opus;
+  const m = model.toLowerCase();
+  if (m.includes('opus') || m.includes('fable')) return MODEL_COLORS.opus;
+  if (m.includes('sonnet')) return MODEL_COLORS.sonnet;
+  if (m.includes('haiku')) return MODEL_COLORS.haiku;
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < m.length; i++) {
+    h ^= m.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  const screen = hslToHex(hue, 72, 68);
+  const glow = `hsla(${hue} 72% 68% / 0.24)`;
+  const code = hslToHex(hue, 60, 85);
+  return { screen, glow, code };
+}
+
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = v => Math.round(v * 255).toString(16).padStart(2, '0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
 
 // Tiny seeded PRNG so per-frame "code rain" is animated but stable within a frame.
 function rng(seed) {
@@ -41,8 +68,8 @@ function shade(hex, amt) {
 // glowing monitor whose color encodes the model tier.
 // (px0, py0) = top-left of the pod cell in buffer coords.
 export function drawWorker(ctx, px0, py0, opts) {
-  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', tier = 'unknown', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null } = opts;
-  const t = TIER[tier] || TIER.unknown;
+  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null } = opts;
+  const t = colorFor(model);
   // working = model generating (types, tier-colored output on screen);
   // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
   const typing = activity === 'working';

@@ -2,7 +2,7 @@
 // CSS) and overlays crisp HTML name plates positioned over each desk. Owns its
 // own animation loop and a 1s tick that updates live uptimes.
 
-import { POD_W, POD_H, drawWorker, TIER } from './sprites.js';
+import { POD_W, POD_H, drawWorker, colorFor } from './sprites.js';
 
 const WALL_H = 40;
 const MARGIN = 8;
@@ -123,7 +123,8 @@ function buildLabels() {
     const el = document.createElement('div');
     el.className = 'plate';
     el.dataset.i = String(i);
-    const t = TIER[a.tier] || TIER.unknown;
+    const t = colorFor(a.model);
+    const modelSlug = shortModel(a.model);
     const dotClass =
       a.activity === 'working' ? 'busy' : a.activity === 'shell' ? 'shell' : a.state === 'done' ? 'done' : 'idle';
     // Chat name moved to the hover tooltip (see ensureTooltip / canvas mousemove).
@@ -136,7 +137,7 @@ function buildLabels() {
       <div class="plate-row">
         <span class="dot ${dotClass}"></span>
         <span class="plate-name">${escapeHtml(a.name)}</span>
-        <span class="plate-tier" style="color:${t.screen}">${t.label}</span>${srcBadge}
+        <span class="plate-tier" style="color:${t.screen}">${escapeHtml(modelSlug)}</span>${srcBadge}
       </div>
       <div class="plate-sub">${escapeHtml(a.title)} · <span class="dept">${escapeHtml(a.project)}</span></div>
       <div class="plate-up">⏱ <span class="up" data-started="${a.startedAt || ''}">${fmtUptime(a.uptimeMs)}</span>${doneBadge}${runBadge}${subBadge}</div>
@@ -182,6 +183,11 @@ function escapeHtml(s) {
 // ---- chat-name hover tooltip (canvas overlay) ----------------------------
 
 let tooltipEl = null;
+function shortModel(m) {
+  if (!m) return '?';
+  return m.replace(/^.+\//, '').replace('claude-', '').replace(/-\d{8}$/, '').replace(/\[1m\]/, ' 1M');
+}
+
 let hoverInit = false;
 
 function ensureTooltip() {
@@ -249,9 +255,8 @@ function initHoverTooltip() {
       return;
     }
     const tip = ensureTooltip();
-    const t = TIER[a.tier] || TIER.unknown;
-    // Secondary line: model-tier label, plus lastPrompt when it differs.
-    let sub = t && t.label ? escapeHtml(t.label) : '';
+    const t = colorFor(a.model);
+    let sub = a.model ? escapeHtml(shortModel(a.model)) : '';
     if (a.lastPrompt && a.lastPrompt !== chat) {
       sub += `${sub ? ' · ' : ''}${escapeHtml(a.lastPrompt)}`;
     }
@@ -378,7 +383,7 @@ function loop(t) {
           skin: a.skin,
           hair: a.hair,
           shirt: a.shirt,
-          tier: a.tier,
+          model: a.model,
           activity: a.activity || 'idle',
           state: a.state,
           subagents: a.subagents || [],
@@ -387,7 +392,7 @@ function loop(t) {
         });
       } else {
         // vacant desk
-        drawWorker(ctx, o.x, o.y, { tier: 'unknown', vacant: true, frame, seed: i + 99 });
+        drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
       }
     }
   }
