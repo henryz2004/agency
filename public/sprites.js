@@ -47,46 +47,164 @@ export function drawWorker(ctx, px0, py0, opts) {
   // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
   const typing = activity === 'working';
   const shellRunning = activity === 'shell';
+  // Brief "thinking" pause in the typing rhythm: a few frames every ~14 where
+  // the hands rest (per-agent phase so pods don't pause in unison).
+  const typePause = typing && (frame + (seed % 7)) % 14 < 3;
 
   const cx = px0 + 22; // worker center x
   const deskTop = py0 + 50;
 
-  // chair back
-  px(ctx, cx - 11, py0 + 16, 22, 34, '#2b313e');
-  px(ctx, cx - 11, py0 + 16, 22, 3, '#3a4150');
-  px(ctx, cx - 13, py0 + 22, 3, 22, '#252b36');
-  px(ctx, cx + 10, py0 + 22, 3, 22, '#252b36');
+  // ---- per-agent appearance, picked deterministically from seed -------------
+  // Draw from a *separate* rng stream than the per-frame animation rng so the
+  // look is identical every frame (variety from seed; motion from frame).
+  const vr = rng(seed * 2654435761 + 7); // "variant" rng — stable per agent
+  const v = {
+    hairStyle: Math.floor(vr() * 4), // 0 short, 1 tall/quiff, 2 side-part, 3 bald-ish
+    build: vr() < 0.5 ? 0 : vr() < 0.7 ? 1 : 2, // 0 normal, 1 broad, 2 slim
+    chair: ['#2b313e', '#3a2e3e', '#2e3a32', '#3a352b', '#2e2e44'][Math.floor(vr() * 5)],
+    glasses: vr() < 0.32,
+    headphones: vr() < 0.28,
+    beard: vr() < 0.24,
+    cap: 0, // resolved below so it can't collide with headphones
+    deskItemL: Math.floor(vr() * 5), // 0 none,1 mug,2 plant,3 sticky,4 papers
+    deskItemR: Math.floor(vr() * 5),
+    blinkPhase: Math.floor(vr() * 11), // staggers blinks across agents
+    breathPhase: Math.floor(vr() * 6),
+    sips: vr() < 0.5, // takes occasional coffee sips when not typing
+  };
+  // A cap/beanie occasionally replaces visible hair-top (skip if headphones).
+  if (!v.headphones && vr() < 0.22) v.cap = vr() < 0.5 ? 1 : 2; // 1 cap, 2 beanie
+
+  // Gentle idle micro-motions — only when NOT actively typing, so working stays
+  // crisp. Cadence is slow (frame increments ~every 130ms).
+  const fp = frame + v.breathPhase;
+  const breath = !typing && fp % 8 < 4 ? 1 : 0; // 1px torso/head rise
+  const headDy = vacant ? 0 : breath; // head bobs with breathing
+  // Occasional slow head turn while idle (a few frames every ~40 frames).
+  const idleState = !typing && !shellRunning && !vacant;
+  const turnCycle = (frame + seed) % 40;
+  const headTurn = idleState && turnCycle < 4 ? 1 : idleState && turnCycle >= 20 && turnCycle < 24 ? -1 : 0;
+  // Eye blink: a 1-frame closure on a per-agent staggered schedule.
+  const blink = !vacant && (frame + v.blinkPhase) % 11 === 0;
+  // Coffee sip: lift mug to face for a couple frames now and then (idle/shell).
+  const sipCycle = (frame + seed * 3) % 36;
+  const sipping = !vacant && v.sips && !typing && sipCycle < 3;
+
+  // chair back (per-agent upholstery color)
+  const chair = v.chair;
+  px(ctx, cx - 11, py0 + 16, 22, 34, chair);
+  px(ctx, cx - 11, py0 + 16, 22, 3, shade(chair, 18));
+  px(ctx, cx - 13, py0 + 22, 3, 22, shade(chair, -16));
+  px(ctx, cx + 10, py0 + 22, 3, 22, shade(chair, -16));
 
   if (!vacant) {
-    // hair (top + sides)
-    px(ctx, cx - 7, py0 + 6, 14, 6, hair);
-    px(ctx, cx - 8, py0 + 10, 3, 8, hair);
-    px(ctx, cx + 5, py0 + 10, 3, 8, hair);
-    // face
-    px(ctx, cx - 6, py0 + 10, 12, 11, skin);
-    px(ctx, cx - 6, py0 + 10, 12, 2, shade(skin, 18)); // forehead highlight
-    // eyes
-    px(ctx, cx - 4, py0 + 15, 2, 2, '#1a1a22');
-    px(ctx, cx + 2, py0 + 15, 2, 2, '#1a1a22');
-    // mouth (focused when generating)
-    px(ctx, cx - 2, py0 + 19, 4, 1, typing ? shade(skin, -40) : shade(skin, -25));
+    const hdx = headTurn; // shorthand: horizontal head/face offset
+    const hy = py0 + 6 - headDy; // head top y, lifts slightly on breath-in
+    // hair / headwear (top + sides), shifted with the head turn
+    if (v.cap === 2) {
+      // beanie: rounded knit hugging the skull
+      px(ctx, cx - 7 + hdx, hy, 14, 5, hair);
+      px(ctx, cx - 7 + hdx, hy + 4, 14, 1, shade(hair, 24)); // knit band
+      px(ctx, cx - 8 + hdx, hy + 5, 3, 4, hair);
+      px(ctx, cx + 5 + hdx, hy + 5, 3, 4, hair);
+    } else if (v.cap === 1) {
+      // ball cap: crown + forward brim
+      px(ctx, cx - 7 + hdx, hy, 14, 4, hair);
+      px(ctx, cx - 7 + hdx, hy + 3, 16, 1, shade(hair, -18)); // brim
+      px(ctx, cx - 8 + hdx, hy + 5, 3, 4, hair);
+      px(ctx, cx + 5 + hdx, hy + 5, 3, 4, hair);
+    } else if (v.hairStyle === 3) {
+      // close-cropped / receding: thin top, longer sides
+      px(ctx, cx - 6 + hdx, hy + 2, 12, 3, hair);
+      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
+      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
+    } else if (v.hairStyle === 1) {
+      // tall quiff
+      px(ctx, cx - 6 + hdx, hy - 2, 12, 8, hair);
+      px(ctx, cx - 3 + hdx, hy - 4, 6, 3, hair);
+      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
+      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
+    } else if (v.hairStyle === 2) {
+      // side part: asymmetric top + a longer side sweep
+      px(ctx, cx - 7 + hdx, hy, 14, 6, hair);
+      px(ctx, cx - 2 + hdx, hy, 2, 3, shade(hair, 20)); // part line
+      px(ctx, cx - 8 + hdx, hy + 4, 3, 9, hair);
+      px(ctx, cx + 5 + hdx, hy + 4, 3, 7, hair);
+    } else {
+      // 0: classic short
+      px(ctx, cx - 7 + hdx, hy, 14, 6, hair);
+      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
+      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
+    }
+    // face (follows the head turn + breath)
+    const fy = py0 + 10 - headDy;
+    px(ctx, cx - 6 + hdx, fy, 12, 11, skin);
+    px(ctx, cx - 6 + hdx, fy, 12, 2, shade(skin, 18)); // forehead highlight
+    // eyes — drawn open, then closed to a thin lid line on a blink frame
+    if (blink) {
+      px(ctx, cx - 4 + hdx, fy + 6, 2, 1, shade(skin, -35));
+      px(ctx, cx + 2 + hdx, fy + 6, 2, 1, shade(skin, -35));
+    } else {
+      px(ctx, cx - 4 + hdx, fy + 5, 2, 2, '#1a1a22');
+      px(ctx, cx + 2 + hdx, fy + 5, 2, 2, '#1a1a22');
+    }
+    // glasses: rims around the eyes + a bridge
+    if (v.glasses) {
+      const gc = '#20242d';
+      px(ctx, cx - 5 + hdx, fy + 4, 4, 4, gc);
+      px(ctx, cx - 4 + hdx, fy + 5, 2, 2, skin); // lens hollow (redrawn below if blink)
+      px(ctx, cx + 1 + hdx, fy + 4, 4, 4, gc);
+      px(ctx, cx + 2 + hdx, fy + 5, 2, 2, skin);
+      px(ctx, cx - 1 + hdx, fy + 5, 2, 1, gc); // bridge
+      // re-stamp pupils on top of the cleared lens (open eyes only)
+      if (!blink) {
+        px(ctx, cx - 4 + hdx, fy + 5, 2, 2, '#1a1a22');
+        px(ctx, cx + 2 + hdx, fy + 5, 2, 2, '#1a1a22');
+      }
+    }
+    // beard: shadow along the jaw + chin
+    if (v.beard) {
+      px(ctx, cx - 6 + hdx, fy + 8, 12, 3, shade(skin, -45));
+      px(ctx, cx - 4 + hdx, fy + 9, 8, 2, shade(skin, -55));
+    }
+    // mouth (focused when generating; hidden behind a mug mid-sip)
+    if (!sipping) {
+      px(ctx, cx - 2 + hdx, fy + 9, 4, 1, typing ? shade(skin, -40) : shade(skin, -25));
+    }
+    // headphones: ear cups + an over-the-head band
+    if (v.headphones) {
+      px(ctx, cx - 8 + hdx, fy + 3, 2, 5, '#23262e'); // left cup
+      px(ctx, cx + 6 + hdx, fy + 3, 2, 5, '#23262e'); // right cup
+      px(ctx, cx - 8 + hdx, py0 + 5 - headDy, 16, 2, '#33373f'); // band
+    }
     // neck
-    px(ctx, cx - 2, py0 + 21, 4, 3, shade(skin, -15));
+    px(ctx, cx - 2 + hdx, py0 + 21 - headDy, 4, 3, shade(skin, -15));
 
-    // torso (shirt), widening trapezoid
-    px(ctx, cx - 6, py0 + 24, 12, 3, shirt);
-    px(ctx, cx - 7, py0 + 27, 14, 4, shirt);
-    px(ctx, cx - 8, py0 + 31, 16, 8, shirt);
-    px(ctx, cx + 3, py0 + 24, 5, 15, shade(shirt, -28)); // right-side shade
-    px(ctx, cx - 1, py0 + 24, 2, 15, shade(shirt, 16)); // collar/placket
+    // torso (shirt), widening trapezoid — width varies with body build
+    const bw = v.build === 1 ? 1 : v.build === 2 ? -1 : 0; // broad/slim delta
+    const ty = py0 + 24 - breath; // whole torso rises a touch on a breath
+    px(ctx, cx - 6 - bw, ty, 12 + bw * 2, 3, shirt);
+    px(ctx, cx - 7 - bw, ty + 3, 14 + bw * 2, 4, shirt);
+    px(ctx, cx - 8 - bw, ty + 7, 16 + bw * 2, 8, shirt);
+    px(ctx, cx + 3 + bw, ty, 5, 15, shade(shirt, -28)); // right-side shade
+    px(ctx, cx - 1, ty, 2, 15, shade(shirt, 16)); // collar/placket
 
     // arms reaching to keyboard — hands only bob while actively generating
-    const lh = typing ? (frame % 2 ? 0 : 1) : 0; // left hand bob
-    const rh = typing ? (frame % 2 ? 1 : 0) : 0; // right hand bob
-    px(ctx, cx - 10, py0 + 30, 3, 12, shade(shirt, -10)); // left arm
-    px(ctx, cx + 7, py0 + 30, 3, 12, shade(shirt, -10)); // right arm
-    px(ctx, cx - 11, deskTop - 4 + lh, 4, 3, skin); // left hand
-    px(ctx, cx + 7, deskTop - 4 + rh, 4, 3, skin); // right hand
+    // (and not during a brief thinking pause)
+    const lh = typing && !typePause ? (frame % 2 ? 0 : 1) : 0; // left hand bob
+    const rh = typing && !typePause ? (frame % 2 ? 1 : 0) : 0; // right hand bob
+    px(ctx, cx - 10 - bw, py0 + 30, 3, 12, shade(shirt, -10)); // left arm
+    px(ctx, cx + 7 + bw, py0 + 30, 3, 12, shade(shirt, -10)); // right arm
+    if (sipping) {
+      // right hand raises a coffee mug toward the mouth instead of typing
+      px(ctx, cx + 7 + bw, py0 + 28, 3, 6, shade(shirt, -10)); // bent forearm
+      px(ctx, cx + 3, fy + 7, 4, 4, '#d8d2c8'); // mug at the lips
+      px(ctx, cx + 3, fy + 8, 1, 2, '#6f5240'); // coffee
+      px(ctx, cx - 11, deskTop - 4, 4, 3, skin); // left hand rests on desk
+    } else {
+      px(ctx, cx - 11, deskTop - 4 + lh, 4, 3, skin); // left hand
+      px(ctx, cx + 7 + bw, deskTop - 4 + rh, 4, 3, skin); // right hand
+    }
   }
 
   // desk slab
@@ -97,6 +215,17 @@ export function drawWorker(ctx, px0, py0, opts) {
   // keyboard
   px(ctx, cx - 9, deskTop - 1, 18, 3, '#1c2029');
   px(ctx, cx - 8, deskTop - 1, 16, 1, '#2a3340');
+
+  // per-agent desk clutter: a small item to the left of the keyboard and one in
+  // the gap before the monitor. Both sit on the desk surface (base at deskTop),
+  // well above the name-plate / minion strip. Suppress the left mug while the
+  // worker is sipping (the mug is in hand then).
+  if (!vacant) {
+    if (!sipping) drawDeskItem(ctx, px0 + 5, deskTop, v.deskItemL, t, frame);
+    // right slot tucks into the keyboard→monitor gap; the monitor (drawn next)
+    // overlaps any 1px spill so a wider prop reads as sitting beside the screen.
+    drawDeskItem(ctx, px0 + 32, deskTop, v.deskItemR, t, frame);
+  }
 
   // monitor on the right side of the desk
   const mx = px0 + 47;
@@ -129,6 +258,8 @@ export function drawWorker(ctx, px0, py0, opts) {
         const lw = 2 + Math.floor(rand() * 8);
         px(ctx, lx, ly, Math.min(lw, mx + 7 - lx), 1, t.code);
       }
+      // during a thinking pause the output settles to a blinking caret
+      if (typePause && frame % 2) px(ctx, mx - 7, mTop + 11, 2, 1, t.code);
     } else if (shellRunning) {
       // terminal log scrolling upward + a blinking cursor
       for (let i = 0; i < 4; i++) {
@@ -169,6 +300,40 @@ export function drawWorker(ctx, px0, py0, opts) {
       drawMinion(ctx, startX + i * spacing, deskTop + 21, (frame + i) % 2);
     }
   }
+}
+
+// A small desk prop, drawn sitting on the desk surface with its base at baseY.
+// kind: 0 none, 1 coffee mug, 2 tiny plant, 3 sticky note, 4 paper stack.
+// Each rises only a few px above the desk — never near the plate/minion strip.
+function drawDeskItem(ctx, x, baseY, kind, t, frame) {
+  if (kind === 1) {
+    // coffee mug with a handle and a wisp of steam
+    px(ctx, x, baseY - 5, 5, 5, '#d8d2c8'); // cup
+    px(ctx, x, baseY - 5, 5, 1, '#ece7df'); // rim highlight
+    px(ctx, x + 1, baseY - 4, 3, 1, '#6f5240'); // coffee surface
+    px(ctx, x + 5, baseY - 4, 1, 2, '#b7b1a7'); // handle
+    if (frame % 4 < 2) px(ctx, x + 2, baseY - 7, 1, 1, '#9aa0ad'); // steam
+  } else if (kind === 2) {
+    // tiny potted plant
+    px(ctx, x + 1, baseY - 3, 4, 3, '#9c5a2e'); // pot
+    px(ctx, x + 1, baseY - 3, 4, 1, '#b06a36'); // pot rim
+    px(ctx, x, baseY - 6, 2, 3, '#3f9a55'); // left frond
+    px(ctx, x + 2, baseY - 7, 2, 4, '#4cb364'); // center frond
+    px(ctx, x + 4, baseY - 5, 2, 2, '#3f9a55'); // right frond
+  } else if (kind === 3) {
+    // sticky note on a small stand, faintly catching the monitor glow
+    px(ctx, x, baseY - 5, 5, 5, '#f4d35e');
+    px(ctx, x, baseY - 5, 5, 1, '#ffe27a');
+    px(ctx, x + 1, baseY - 3, 3, 1, shade('#f4d35e', -60)); // scribble
+    px(ctx, x + 1, baseY - 1, 2, 1, t.glow ? shade(t.screen, -30) : '#888');
+  } else if (kind === 4) {
+    // stack of papers, slightly skewed
+    px(ctx, x, baseY - 2, 6, 2, '#e8e4dc');
+    px(ctx, x + 1, baseY - 4, 6, 2, '#f2efe9');
+    px(ctx, x + 1, baseY - 4, 6, 1, '#ffffff');
+    px(ctx, x + 2, baseY - 3, 3, 1, '#b9b4ab'); // text line
+  }
+  // kind 0: nothing
 }
 
 // A tiny teal "helper" figure representing a running subagent.

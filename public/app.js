@@ -4,12 +4,15 @@
 
 import { initOffice, setAgents } from './render.js';
 import { drawHead, TIER } from './sprites.js';
+import { initSoundPref, toggleSound, updateSound } from './sound.js';
+import { initUI } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 
 const office = $('office');
 const labels = $('labels');
 initOffice(office, labels);
+initUI();
 
 // ---- assumptions (persisted) ---------------------------------------------
 
@@ -72,6 +75,12 @@ function tierOfModel(model) {
   if (m.includes('opus') || m.includes('fable')) return 'opus';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
+  if (m.includes('o3') || m.includes('o4') || m.includes('gpt-4') || m.includes('gemini-2.5-pro')) return 'opus';
+  if (m.includes('gpt-4o') || m.includes('gemini-2.5-flash') || m.includes('glm-5')) return 'sonnet';
+  if (m.includes('gpt-4o-mini') || m.includes('gemini-2.0-flash') || m.includes('glm-4')) return 'haiku';
+  if (m.includes('deepseek-r1') || m.includes('deepseek-v3')) return 'opus';
+  if (m.includes('deepseek-chat') || m.includes('llama-4')) return 'sonnet';
+  if (m.includes('llama-3') || m.includes('qwen') || m.includes('mistral')) return 'sonnet';
   return 'unknown';
 }
 
@@ -91,9 +100,11 @@ function onState() {
   const { live, usage } = STATE;
   setAgents(live.agents);
 
+  const workingCount = live.agents.filter((a) => a.activity === 'working').length;
   $('tsLive').textContent = live.agents.length;
-  $('tsBusy').textContent = live.agents.filter((a) => a.activity === 'working').length;
+  $('tsBusy').textContent = workingCount;
   $('tsTeams').textContent = (live.teams || []).filter((t) => (t.members || []).length > 1).length;
+  updateSound(workingCount);
   $('emptyBanner').classList.toggle('hidden', live.agents.length > 0);
 
   renderManpower();
@@ -130,6 +141,8 @@ function renderManpower() {
   $('mEngYears').textContent = engYears >= 1 ? engYears.toFixed(1) : engYears.toFixed(2);
   $('mPayroll').textContent = money(payroll);
   $('mToday').textContent = engDaysToday.toFixed(engDaysToday >= 10 ? 0 : 1);
+
+  updatePayrollRate(avgDailyOut, perEngDay);
 
   const team = Math.max(1, Math.round(teamSize));
   const shown = Math.min(team, 60);
@@ -173,6 +186,62 @@ function drawHeadcount(team) {
   }
 }
 
+// ---- live payroll-equivalent meter ---------------------------------------
+// A money meter that ticks UP in real time. We derive a $/sec accrual rate from
+// recent throughput and accumulate it via requestAnimationFrame so the figure
+// keeps climbing while the page is open. The rate is recomputed on every slider
+// change / new STATE without resetting the running total (no jarring jumps).
+
+let payrollRate = 0; // dollars per second
+let payrollTotal = 0; // accumulated dollars shown on the meter
+let payrollLastTs = 0; // timestamp of last rAF frame (ms)
+let payrollStarted = false;
+
+function updatePayrollRate(avgDailyOut, perEngDay) {
+  // engineer-days produced per real day -> $/day -> $/sec.
+  // perEngDay = tok/hr * hrs = output one engineer ships per workday.
+  const engDaysPerDay = perEngDay > 0 ? avgDailyOut / perEngDay : 0;
+  const dollarsPerWorkday = assume.days > 0 ? assume.sal / assume.days : 0;
+  const dollarsPerDay = engDaysPerDay * dollarsPerWorkday;
+  payrollRate = Math.max(0, dollarsPerDay / 86400);
+
+  const rateEl = $('pmRate');
+  if (rateEl) rateEl.textContent = payrollRate > 0 ? `+${money(payrollRate * 3600)}/hr` : '—';
+
+  // Seed the starting total once with the lifetime payroll equivalent so the
+  // meter shows a meaningful figure immediately, then climbs from there.
+  if (!payrollStarted) {
+    const usage = STATE && STATE.usage;
+    if (usage && usage.lifetime) {
+      const perEngYear = perEngDay * assume.days;
+      const engYears = perEngYear > 0 ? (usage.lifetime.out || 0) / perEngYear : 0;
+      payrollTotal = engYears * assume.sal;
+      payrollStarted = true;
+    }
+  }
+}
+
+function renderPayrollValue() {
+  const el = $('pmValue');
+  if (!el) return;
+  const whole = Math.floor(payrollTotal);
+  const cents = Math.floor((payrollTotal - whole) * 100);
+  el.innerHTML = `$${comma(whole)}<span class="pm-cents">.${String(cents).padStart(2, '0')}</span>`;
+}
+
+function payrollTick(ts) {
+  if (payrollLastTs) {
+    // Clamp dt so a backgrounded/throttled tab doesn't dump a huge lump sum on
+    // refocus (rAF pauses in hidden tabs). Smooth climbing only.
+    const dt = Math.min((ts - payrollLastTs) / 1000, 1);
+    payrollTotal += payrollRate * dt;
+  }
+  payrollLastTs = ts;
+  renderPayrollValue();
+  requestAnimationFrame(payrollTick);
+}
+requestAnimationFrame(payrollTick);
+
 // ---- model mix ------------------------------------------------------------
 
 function renderModels(usage) {
@@ -209,7 +278,8 @@ function shortModel(m) {
   return m
     .replace('claude-', '')
     .replace(/-\d{8}$/, '')
-    .replace(/\[1m\]/, ' 1M');
+    .replace(/\[1m\]/, ' 1M')
+    .replace(/^.+\//, '');
 }
 
 // ---- departments ----------------------------------------------------------
@@ -306,23 +376,24 @@ function fmtUptimeShort(ms) {
 function renderTicker() {
   const { live, usage } = STATE;
   const items = [];
-  for (const a of live.agents) {
+for (const a of live.agents) {
     const tl = (TIER[a.tier] || TIER.unknown).label;
     const name = escapeHtml(a.name);
     const proj = escapeHtml(a.project);
     const labelText = a.task || a.chatName || a.lastPrompt;
-    const label = labelText ? `“${escapeHtml(labelText)}”` : '';
+    const label = labelText ? `"${escapeHtml(labelText)}"` : '';
     const up = fmtUptimeShort(a.uptimeMs);
     const subN = (a.subagents || []).length;
     const sub = subN ? ` · 🤖 ${subN} subagent${subN > 1 ? 's' : ''}` : '';
+    const src = a.source === 'opencode' ? ' 🟠' : '';
     if (a.activity === 'working') {
-      items.push(`🟢 <b>${name}</b> (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${tl}${sub} · up ${up}`);
+      items.push(`🟢 <b>${name}</b>${src} (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${tl}${sub} · up ${up}`);
     } else if (a.activity === 'shell') {
-      items.push(`⚙ <b>${name}</b> running a command in <b>${proj}</b>${label ? ` — ${label}` : ''}${sub} · up ${up}`);
+      items.push(`⚙ <b>${name}</b>${src} running a command in <b>${proj}</b>${label ? ` — ${label}` : ''}${sub} · up ${up}`);
     } else if (a.state === 'done') {
-      items.push(`✅ <b>${name}</b> finished${label ? ` ${label}` : ''} in ${proj} · up ${up}`);
+      items.push(`✅ <b>${name}</b>${src} finished${label ? ` ${label}` : ''} in ${proj} · up ${up}`);
     } else {
-      items.push(`💤 <b>${name}</b> idle in ${proj}${label ? ` — ${label}` : ''}${sub} · up ${up}`);
+      items.push(`💤 <b>${name}</b>${src} idle in ${proj}${label ? ` — ${label}` : ''}${sub} · up ${up}`);
     }
   }
   const top = Object.entries(usage.byProject || {}).sort((a, b) => b[1].out - a[1].out)[0];
@@ -349,6 +420,25 @@ bindSlider('sTok', 'tok', (v) => comma(v));
 bindSlider('sHrs', 'hrs', (v) => String(v));
 bindSlider('sDays', 'days', (v) => String(v));
 bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
+
+// ---- sound toggle ---------------------------------------------------------
+// Pref is read at load (no audio yet); the AudioContext is created/resumed only
+// inside the click handler (a user gesture). Defaults to OFF.
+(function wireSound() {
+  const btn = $('soundToggle');
+  if (!btn) return;
+  function paint(on) {
+    btn.textContent = on ? '🔊' : '🔇';
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  // Reflect the saved pref visually, but do NOT start audio until a gesture.
+  paint(initSoundPref());
+  btn.addEventListener('click', () => {
+    const on = toggleSound(); // creates/resumes AudioContext on first enable
+    paint(on);
+  });
+})();
 
 window.addEventListener('resize', () => {
   if (STATE) {

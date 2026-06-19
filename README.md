@@ -1,15 +1,16 @@
 # 🏢 Agency
 
-A live pixel-art office sim of your Claude Code workforce.
+A live pixel-art office sim of your Claude Code and opencode workforce.
 
-You're a one-person startup — but your Claude Code agents do the work of *many*.
-Agency reads your **real, local** Claude Code data and visualizes it as a tiny
-retro office: every running `claude` session is a pixel worker at a desk (typing
+You're a one-person startup — but your AI coding agents do the work of *many*.
+Agency reads your **real, local** Claude Code data (from `~/.claude/`) **and**
+opencode data (from `~/.local/share/opencode/`) and visualizes it as a tiny
+retro office: every running session is a pixel worker at a desk (typing
 when busy, monitor glowing by model tier), and your token throughput gets
 translated into **manpower** — effective team size, engineer-years shipped, and
 the payroll you'd be paying humans to match it.
 
-Nothing leaves your machine. No dependencies. It just reads `~/.claude/`.
+Nothing leaves your machine. No dependencies.
 
 ![Agency](docs/screenshot.png)
 
@@ -27,8 +28,8 @@ appear at desks within ~3 seconds, busy ones start typing, and uptimes tick live
 
 ## What it shows
 
-**The floor** — one desk per *running* Claude Code session, discovered from
-`~/.claude/sessions/<pid>.json` and validated against live PIDs. Each agent gets:
+**The floor** — one desk per *running* session (Claude Code or opencode), discovered from
+`~/.claude/sessions/<pid>.json` (validated against live PIDs) or the opencode SQLite database. Each agent gets:
 - a stable name + job title (Intern → Principal, keyed to its model tier),
 - a glowing monitor colored by model (Opus = gold, Sonnet = cyan, Haiku = green),
 - a "typing" animation while `busy`, and a live uptime counter.
@@ -55,13 +56,14 @@ Zero dependencies — just Node's `http` + `fs` and a vanilla-JS canvas frontend
 | `server.js` | HTTP server; single `/api/state` endpoint fusing live + usage |
 | `lib/live.js` | running sessions, uptime, status, per-session model |
 | `lib/usage.js` | parses `~/.claude/projects/**/*.jsonl`, cached by mtime+size |
+| `lib/opencode.js` | reads opencode SQLite DB for live sessions + usage stats |
 | `lib/roster.js` | stable name/title/palette per session (persisted) |
 | `public/render.js` | the pixel office: layout, animation, name plates |
 | `public/sprites.js` | procedural pixel-art drawing |
 | `public/app.js` | data polling, manpower math, panels, ticker |
 
-Usage stats are cached in `data/usage-cache.json` (only changed transcripts are
-re-parsed on refresh); agent identities persist in `data/roster.json`.
+Usage stats are cached in `data/usage-cache.json` and `data/opencode-usage-cache.json`
+(only changed transcripts/DB state are re-parsed on refresh); agent identities persist in `data/roster.json`.
 
 > The manpower numbers are a deliberately fun heuristic, not a benchmark — they
 > exist to make a one-person shop *feel like more*. Tune the sliders to taste.

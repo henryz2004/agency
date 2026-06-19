@@ -34,6 +34,8 @@
         <div class="tstat-lbl">teams</div>
       </div>
       <div class="tstat live-pill"><span class="rec"></span> LIVE</div>
+      <button id="soundToggle" class="sound-toggle" type="button" aria-pressed="false" title="Toggle office sound">🔇</button>
+      <button id="panelToggle" class="panel-toggle active" type="button" title="Toggle stats panel">📊</button>
     </div>
   </header>
 
@@ -45,6 +47,11 @@
         <div id="emptyBanner" class="empty-banner hidden">
           No agents on the floor — run <code>claude</code> in any project to hire one.
         </div>
+        <div class="zoom-controls">
+          <button id="zoomOut" type="button" title="Zoom out">−</button>
+          <button id="zoomFit" type="button" title="Fit to window">⛶</button>
+          <button id="zoomIn" type="button" title="Zoom in">+</button>
+        </div>
       </div>
       <div class="ticker"><div class="ticker-track" id="tickerTrack"></div></div>
     </section>
@@ -54,6 +61,10 @@
         <div class="card-title">Effective team size</div>
         <div class="bignum"><span id="hcNum">0.0</span><span class="bignum-unit">engineers</span></div>
         <div class="card-note">your recent daily output vs one human's</div>
+        <div class="payroll-meter">
+          <div class="pm-label">Payroll-equivalent earned <span class="pm-rate" id="pmRate">—</span></div>
+          <div class="pm-value" id="pmValue">$0<span class="pm-cents">.00</span></div>
+        </div>
         <canvas id="headsCanvas" class="heads"></canvas>
         <div class="hc-compare" id="hcCompare">1 human operating like a team of —</div>
         <div class="hc-grid">
@@ -104,6 +115,8 @@
         <div class="ledger" id="ledger"></div>
       </div>
     </aside>
+
+    <div id="panelHandle" class="panel-handle" title="Show stats">📊</div>
   </main>
 
   <script type="module" src="/app.js"></script>
