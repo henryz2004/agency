@@ -361,7 +361,7 @@ function fmtUptimeShort(ms) {
 function renderTicker() {
   const { live, usage } = STATE;
   const items = [];
-for (const a of live.agents) {
+  for (const a of live.agents) {
     const ml = a.model ? shortModel(a.model) : '?';
     const name = escapeHtml(a.name);
     const proj = escapeHtml(a.project);
@@ -370,7 +370,7 @@ for (const a of live.agents) {
     const up = fmtUptimeShort(a.uptimeMs);
     const subN = (a.subagents || []).length;
     const sub = subN ? ` · 🤖 ${subN} subagent${subN > 1 ? 's' : ''}` : '';
-    const src = a.source === 'opencode' ? ' 🟠' : '';
+    const src = a.source === 'opencode' ? ' · opencode' : a.source === 'codex' ? ' · codex' : '';
     if (a.activity === 'working') {
       items.push(`🟢 <b>${name}</b>${src} (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${ml}${sub} · up ${up}`);
     } else if (a.activity === 'shell') {

@@ -1,7 +1,7 @@
-// ui.js — wires the hovering/collapsible stats panel and the office zoom
-// controls to the renderer. Kept separate so it doesn't tangle with app.js.
+// ui.js — wires the hovering/collapsible stats panel to the renderer. The
+// office camera (pan / zoom / recenter) is driven by gestures inside render.js.
 
-import { setReservedRight, zoomBy, zoomFit } from './render.js';
+import { setReservedRight } from './render.js';
 
 const $ = (id) => document.getElementById(id);
 const GAP = 16; // breathing room between the office and the panel
@@ -32,13 +32,6 @@ export function initUI() {
 
   if (toggle) toggle.addEventListener('click', () => set(!open));
   if (handle) handle.addEventListener('click', () => set(true));
-
-  const zi = $('zoomIn');
-  const zo = $('zoomOut');
-  const zf = $('zoomFit');
-  if (zi) zi.addEventListener('click', () => zoomBy(1.2));
-  if (zo) zo.addEventListener('click', () => zoomBy(1 / 1.2));
-  if (zf) zf.addEventListener('click', () => zoomFit());
 
   // panel width can depend on viewport (max-width: 86vw) — re-reserve on resize.
   window.addEventListener('resize', () => {

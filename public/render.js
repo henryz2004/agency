@@ -1,18 +1,39 @@
-// render.js — draws the pixel office into a low-res buffer (scaled crisply by
-// CSS) and overlays crisp HTML name plates positioned over each desk. Owns its
-// own animation loop and a 1s tick that updates live uptimes.
+// render.js — draws the pixel office into a low-res buffer, then lets the user
+// pan/zoom it like a Sims camera. The canvas + scaled name tags live inside a
+// transformed `.world` element, so tags scale WITH the floor and can never
+// overlap. Full per-agent detail surfaces in a readable, screen-space info card
+// on hover / click.
 
-import { POD_W, POD_H, drawWorker, colorFor } from './sprites.js';
+import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, colorFor } from './sprites.js';
 
 const WALL_H = 40;
-const MARGIN = 8;
+const MARGIN = 14;
+const COL_GAP = 14; // horizontal breathing room between desks
+const ROW_GAP = 34; // vertical band beneath each desk that holds its name tag
+const FIT_PAD = 28; // slack left around the office when fitting to the frame
 
-let canvas, ctx, labelLayer;
+let canvas, ctx, labelLayer, world, viewport, card, recenterBtn;
 let agents = [];
 let cols = 1, rows = 1, bufW = 0, bufH = 0;
 let frame = 0;
-let zoom = 1; // user zoom multiplier on top of the fit-to-frame scale
 let reservedRight = 0; // px reserved on the right for the hovering panel
+
+// ---- camera --------------------------------------------------------------
+// Pan = world translate(cam.x, cam.y); zoom = cam.s (applied to the canvas CSS
+// size + label-layer transform). All in viewport-local px.
+let cam = { s: 1, x: 0, y: 0 };
+let fitScale = 1;
+let userMoved = false; // true once the user pans/zooms — suppresses auto-fit
+
+// ---- interaction state ---------------------------------------------------
+// Selection is tracked by a stable per-agent key so it follows the agent across
+// polls (the agent array can reorder); selIdx is re-resolved from it each poll.
+let hoverIdx = -1, selIdx = -1, cardIdx = -1, selKey = null;
+const pointers = new Map();
+let down = null, lastX = 0, lastY = 0, panning = false, dragged = false;
+let pinchPrevDist = null;
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // choose a pleasing column count for N desks
 function colsFor(n) {
@@ -33,241 +54,405 @@ function fmtUptime(ms) {
   return `${s}s`;
 }
 
+function shortModel(m) {
+  if (!m) return '?';
+  return m.replace(/^.+\//, '').replace('claude-', '').replace(/-\d{8}$/, '').replace(/\[1m\]/, ' 1M');
+}
+
 export function initOffice(canvasEl, labelLayerEl) {
   canvas = canvasEl;
   ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   labelLayer = labelLayerEl;
-  window.addEventListener('resize', () => fitCanvas());
-  initHoverTooltip();
+  world = canvas.parentElement; // .world
+  viewport = world.parentElement; // .floor-frame
+  world.style.transformOrigin = '0 0';
+
+  card = document.createElement('div');
+  card.className = 'info-card';
+  card.style.display = 'none';
+  viewport.appendChild(card);
+
+  recenterBtn = document.getElementById('recenter');
+  if (recenterBtn) recenterBtn.addEventListener('click', () => fitView());
+
+  setupInteractions();
+  window.addEventListener('resize', onResize);
   requestAnimationFrame(loop);
   setInterval(tickUptimes, 1000);
 }
 
 export function setAgents(next) {
   agents = next || [];
+  // Re-resolve the selected agent by its stable key so the ring/card stay on
+  // the same person even if the roster reorders between polls.
+  selIdx = selKey ? agents.findIndex((a) => keyOf(a) === selKey) : -1;
+  if (selIdx < 0) selKey = null;
+  if (hoverIdx >= agents.length) hoverIdx = -1;
   layout();
   buildLabels();
+  showCardFor(hoverIdx >= 0 ? hoverIdx : selIdx);
 }
 
-// Compute grid + buffer size, then size the canvas backing store.
-function layout() {
-  // Render every live agent, padding only the last row so the grid is
-  // rectangular, with a small minimum so a quiet office still looks like one.
-  const n = agents.length;
-  const gridSlots = Math.max(n, 4); // never show fewer than a 2x2-ish office
-  cols = colsFor(gridSlots);
-  rows = Math.ceil(gridSlots / cols); // last row gets padded with vacant desks
+function keyOf(a) {
+  if (!a) return null;
+  return a.sessionId || (a.pid != null ? `pid:${a.pid}` : null);
+}
 
-  bufW = MARGIN * 2 + cols * POD_W;
-  bufH = WALL_H + MARGIN + rows * POD_H + MARGIN;
-  canvas.width = bufW;
+// ---- layout + camera -----------------------------------------------------
+
+function layout() {
+  const n = agents.length;
+  const gridSlots = Math.max(n, 4); // never show fewer than a small office
+  cols = colsFor(gridSlots);
+  rows = Math.ceil(gridSlots / cols);
+
+  bufW = MARGIN * 2 + cols * POD_W + (cols - 1) * COL_GAP;
+  bufH = WALL_H + MARGIN + rows * (POD_H + ROW_GAP) + MARGIN;
+
+  canvas.width = bufW; // backing store stays at buffer resolution
   canvas.height = bufH;
   ctx.imageSmoothingEnabled = false;
-  fitCanvas();
-}
+  // The label layer lives in buffer coordinates; applyCam() scales it to match.
+  labelLayer.style.width = bufW + 'px';
+  labelLayer.style.height = bufH + 'px';
 
-// ---- fit + zoom ----------------------------------------------------------
-
-// Size the on-screen canvas to fit the available floor area (minus the space
-// reserved for the hovering panel), times the user zoom factor. Small offices
-// scale up; large ones scale down so everything fits without scrolling.
-function fitCanvas() {
-  if (!canvas || !bufW || !bufH) return;
-  const frame = canvas.parentElement;
-  if (!frame) return;
-  const pad = 10; // .floor-frame padding
-  const availW = Math.max(40, frame.clientWidth - pad * 2 - reservedRight);
-  const availH = Math.max(40, frame.clientHeight - pad * 2);
-  const fit = Math.min(availW / bufW, availH / bufH);
-  const eff = Math.max(0.05, Math.min(fit, 5) * zoom);
-  canvas.style.width = Math.round(bufW * eff) + 'px';
-  canvas.style.height = Math.round(bufH * eff) + 'px';
-  positionLabels();
-}
-
-// Reserve horizontal space on the right (for the hovering stats panel) + refit.
-export function setReservedRight(px) {
-  reservedRight = Math.max(0, px || 0);
-  fitCanvas();
-}
-
-export function zoomBy(factor) {
-  zoom = Math.min(3, Math.max(0.3, zoom * factor));
-  fitCanvas();
-}
-
-export function zoomFit() {
-  zoom = 1;
-  fitCanvas();
+  if (!userMoved) fitView();
+  else { computeFit(); commit(); } // keep the user's view, just re-clamp
 }
 
 function podOrigin(i) {
   const c = i % cols;
   const r = Math.floor(i / cols);
   return {
-    x: MARGIN + c * POD_W,
-    y: WALL_H + MARGIN + r * POD_H,
+    x: MARGIN + c * (POD_W + COL_GAP),
+    y: WALL_H + MARGIN + r * (POD_H + ROW_GAP),
   };
 }
 
-function totalSlots() {
-  return rows * cols;
+function totalSlots() { return rows * cols; }
+
+// Compute the scale + offset that frames the whole office in the free area
+// (left of the panel). Updates fitScale (used for zoom clamps) and returns it.
+function computeFit() {
+  if (!viewport || !bufW || !bufH) return cam;
+  const availW = Math.max(40, viewport.clientWidth - reservedRight);
+  const availH = Math.max(40, viewport.clientHeight);
+  const s = Math.min((availW - FIT_PAD * 2) / bufW, (availH - FIT_PAD * 2) / bufH);
+  fitScale = clamp(s, 0.05, 6);
+  return {
+    s: fitScale,
+    x: (availW - bufW * fitScale) / 2,
+    y: (availH - bufH * fitScale) / 2,
+  };
 }
 
-// ---- name plates (HTML overlay) ------------------------------------------
+function fitView() {
+  const f = computeFit();
+  cam = { ...f };
+  userMoved = false;
+  clampPan();
+  applyCam();
+  updateRecenter();
+  positionCard(cardIdx);
+}
 
-function buildLabels() {
-  labelLayer.innerHTML = '';
-  agents.forEach((a, i) => {
-    const el = document.createElement('div');
-    el.className = 'plate';
-    el.dataset.i = String(i);
-    const t = colorFor(a.model);
-    const modelSlug = shortModel(a.model);
-    const dotClass =
-      a.activity === 'working' ? 'busy' : a.activity === 'shell' ? 'shell' : a.state === 'done' ? 'done' : 'idle';
-    // Chat name moved to the hover tooltip (see ensureTooltip / canvas mousemove).
-    const doneBadge = a.state === 'done' ? ' <span class="plate-badge done">✓ done</span>' : '';
-    const runBadge = a.activity === 'shell' ? ' <span class="plate-badge run">⚙ shell</span>' : '';
-    const subN = (a.subagents || []).length;
-    const subBadge = subN ? ` <span class="plate-badge sub">🤖 ${subN} subagent${subN > 1 ? 's' : ''}</span>` : '';
-    const srcBadge = a.source === 'opencode' ? ' <span class="plate-badge oc">opencode</span>' : '';
-    el.innerHTML = `
-      <div class="plate-row">
-        <span class="dot ${dotClass}"></span>
-        <span class="plate-name">${escapeHtml(a.name)}</span>
-        <span class="plate-tier" style="color:${t.screen}">${escapeHtml(modelSlug)}</span>${srcBadge}
-      </div>
-      <div class="plate-sub">${escapeHtml(a.title)} · <span class="dept">${escapeHtml(a.project)}</span></div>
-      <div class="plate-up">⏱ <span class="up" data-started="${a.startedAt || ''}">${fmtUptime(a.uptimeMs)}</span>${doneBadge}${runBadge}${subBadge}</div>
-    `;
-    labelLayer.appendChild(el);
+function minScale() { return Math.max(0.08, fitScale * 0.4); }
+function maxScale() { return Math.max(8, fitScale * 6); }
+
+function applyCam() {
+  // Pan via the world's translate. Zoom is applied by resizing the canvas in
+  // CSS px (keeps `image-rendering: pixelated` crisp — a transform scale would
+  // blur it) and scaling the in-world label layer by a matching factor so the
+  // tags track their desks exactly.
+  world.style.transform = `translate(${cam.x}px, ${cam.y}px)`;
+  canvas.style.width = bufW * cam.s + 'px';
+  canvas.style.height = bufH * cam.s + 'px';
+  labelLayer.style.transform = `scale(${cam.s})`;
+}
+
+function clampPan() {
+  const w = bufW * cam.s, h = bufH * cam.s;
+  const vw = viewport.clientWidth, vh = viewport.clientHeight;
+  const KEEP = 90; // always keep this much of the office on-screen
+  cam.x = clamp(cam.x, KEEP - w, vw - KEEP);
+  cam.y = clamp(cam.y, KEEP - h, vh - KEEP);
+}
+
+// Apply pan/zoom changes: clamp, paint, update affordances, re-anchor the card.
+function commit() {
+  clampPan();
+  applyCam();
+  updateRecenter();
+  positionCard(cardIdx);
+}
+
+function updateRecenter() {
+  if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
+}
+
+// Zoom toward a client-space anchor point (cursor / pinch midpoint).
+function zoomAt(clientX, clientY, factor) {
+  const rect = viewport.getBoundingClientRect();
+  const lx = clientX - rect.left, ly = clientY - rect.top; // viewport-local
+  const bx = (lx - cam.x) / cam.s, by = (ly - cam.y) / cam.s; // buffer coords
+  const ns = clamp(cam.s * factor, minScale(), maxScale());
+  cam.x = lx - bx * ns;
+  cam.y = ly - by * ns;
+  cam.s = ns;
+  userMoved = true;
+  commit();
+}
+
+export function setReservedRight(px) {
+  reservedRight = Math.max(0, px || 0);
+  if (!userMoved) fitView();
+  else commit();
+}
+
+export function zoomBy(factor) {
+  const r = viewport.getBoundingClientRect();
+  zoomAt(r.left + viewport.clientWidth / 2, r.top + viewport.clientHeight / 2, factor);
+}
+
+export function zoomFit() { fitView(); }
+
+function onResize() {
+  if (!userMoved) fitView();
+  else commit();
+}
+
+// ---- pointer / wheel interaction -----------------------------------------
+
+function setupInteractions() {
+  viewport.addEventListener('pointerdown', onPointerDown);
+  viewport.addEventListener('pointermove', onPointerMove);
+  viewport.addEventListener('pointerup', onPointerUp);
+  viewport.addEventListener('pointercancel', onPointerUp);
+  viewport.addEventListener('pointerleave', () => {
+    if (pointers.size === 0) { hoverIdx = -1; showCardFor(selIdx); }
   });
-  positionLabels();
-}
-
-function positionLabels() {
-  if (!canvas || !labelLayer) return;
-  // keep the (absolute) label layer exactly over the canvas, which may be
-  // centered and zoomed within the floor frame.
-  labelLayer.style.left = canvas.offsetLeft + 'px';
-  labelLayer.style.top = canvas.offsetTop + 'px';
-  labelLayer.style.width = canvas.clientWidth + 'px';
-  labelLayer.style.height = canvas.clientHeight + 'px';
-  const scale = canvas.clientWidth / (bufW || 1);
-  const plates = labelLayer.querySelectorAll('.plate');
-  plates.forEach((el) => {
-    const i = Number(el.dataset.i);
-    const o = podOrigin(i);
-    const cxBuf = o.x + POD_W / 2;
-    const cyBuf = o.y + 74; // just under the desk + subagent huddle
-    el.style.left = `${cxBuf * scale}px`;
-    el.style.top = `${cyBuf * scale}px`;
+  viewport.addEventListener('wheel', onWheel, { passive: false });
+  viewport.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.altKey ? 0.6 : 1.7);
+    // Double-click zooms into a desk AND selects it (the two preceding taps
+    // would otherwise toggle the selection back off).
+    selectAt(e.clientX, e.clientY, true);
   });
 }
 
-function tickUptimes() {
-  if (!labelLayer) return;
-  const now = Date.now();
-  labelLayer.querySelectorAll('.up').forEach((el) => {
-    const started = Number(el.dataset.started);
-    if (started) el.textContent = fmtUptime(now - started);
-  });
-}
-
-function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
-// ---- chat-name hover tooltip (canvas overlay) ----------------------------
-
-let tooltipEl = null;
-function shortModel(m) {
-  if (!m) return '?';
-  return m.replace(/^.+\//, '').replace('claude-', '').replace(/-\d{8}$/, '').replace(/\[1m\]/, ' 1M');
-}
-
-let hoverInit = false;
-
-function ensureTooltip() {
-  if (tooltipEl) return tooltipEl;
-  // one-time stylesheet for the tooltip + its lines
-  if (!document.getElementById('agency-tooltip-style')) {
-    const style = document.createElement('style');
-    style.id = 'agency-tooltip-style';
-    style.textContent = `
-      .agency-tooltip {
-        position: absolute;
-        z-index: 9999;
-        pointer-events: none;
-        max-width: 320px;
-        padding: 4px 8px;
-        background: rgba(8, 11, 18, 0.96);
-        border: 1px solid #222c40;
-        border-radius: 4px;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-        font-family: 'VT323', ui-monospace, monospace;
-        font-size: 16px;
-        line-height: 1.15;
-        white-space: nowrap;
-        display: none;
-      }
-      .agency-tooltip .tt-name { color: #ffd166; }
-      .agency-tooltip .tt-sub { color: #8aa0c0; font-size: 14px; margin-top: 2px; }
-    `;
-    document.head.appendChild(style);
+function onPointerDown(e) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return; // left button only
+  // Let interactive overlays (the recenter button) handle their own clicks
+  // rather than starting a floor pan / capturing the pointer.
+  if (e.target.closest && e.target.closest('.recenter')) return;
+  viewport.setPointerCapture?.(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) {
+    down = { x: e.clientX, y: e.clientY };
+    lastX = e.clientX; lastY = e.clientY;
+    dragged = false; panning = true;
+  } else if (pointers.size === 2) {
+    pinchPrevDist = null; // seeded on first 2-pointer move
   }
-  tooltipEl = document.createElement('div');
-  tooltipEl.className = 'agency-tooltip';
-  document.body.appendChild(tooltipEl);
-  return tooltipEl;
 }
 
-function hideTooltip() {
-  if (tooltipEl) tooltipEl.style.display = 'none';
+function onPointerMove(e) {
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size >= 2) {
+    // two-finger pinch → zoom about the midpoint
+    const pts = [...pointers.values()];
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    if (pinchPrevDist) zoomAt(mid.x, mid.y, dist / pinchPrevDist);
+    pinchPrevDist = dist;
+    dragged = true;
+    return;
+  }
+
+  if (panning) {
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    if (!dragged && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) {
+      dragged = true; userMoved = true; viewport.style.cursor = 'grabbing';
+    }
+    if (dragged) { cam.x += dx; cam.y += dy; commit(); }
+  } else {
+    updateHover(e.clientX, e.clientY);
+  }
 }
 
-// Map client coords → buffer coords, find which pod the cursor is over.
-function podAtClient(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  const scale = (canvas.clientWidth || rect.width) / (bufW || 1);
-  if (!scale) return -1;
-  const bx = (clientX - rect.left) / scale;
-  const by = (clientY - rect.top) / scale;
+function onPointerUp(e) {
+  viewport.releasePointerCapture?.(e.pointerId);
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchPrevDist = null;
+  if (pointers.size === 0) {
+    if (!dragged) selectAt(e.clientX, e.clientY); // a clean tap selects a desk
+    panning = false; dragged = false;
+    viewport.style.cursor = 'grab';
+    updateHover(e.clientX, e.clientY);
+  } else {
+    // A pinch dropped to one finger: re-anchor and restart the tap/drag
+    // decision so the survivor doesn't resume mid-"drag".
+    const p = [...pointers.values()][0];
+    lastX = p.x; lastY = p.y;
+    down = { x: p.x, y: p.y };
+    dragged = false;
+  }
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  // Zoom on: trackpad pinch (ctrl-wheel), ⌘-wheel, or a physical mouse wheel
+  // (line-mode, vertical-only). A trackpad two-finger scroll (pixel-mode) pans.
+  const mouseWheel = e.deltaMode !== 0 && e.deltaX === 0;
+  if (e.ctrlKey || e.metaKey || mouseWheel) {
+    const step = e.deltaMode !== 0 ? e.deltaY * 16 : e.deltaY; // normalize lines→px
+    zoomAt(e.clientX, e.clientY, Math.exp(-step * 0.01));
+  } else {
+    // Two-finger scroll pans the floor.
+    cam.x -= e.deltaX; cam.y -= e.deltaY;
+    userMoved = true; commit();
+    updateHover(e.clientX, e.clientY);
+  }
+}
+
+// ---- hover / selection ----------------------------------------------------
+
+// Which agent's desk is under a client-space point (-1 if none / vacant).
+function podAt(clientX, clientY) {
+  const rect = viewport.getBoundingClientRect();
+  const bx = (clientX - rect.left - cam.x) / cam.s;
+  const by = (clientY - rect.top - cam.y) / cam.s;
   const slots = totalSlots();
   for (let i = 0; i < slots; i++) {
+    if (!agents[i]) continue;
     const o = podOrigin(i);
     if (bx >= o.x && bx < o.x + POD_W && by >= o.y && by < o.y + POD_H) return i;
   }
   return -1;
 }
 
-function initHoverTooltip() {
-  if (hoverInit || !canvas) return;
-  hoverInit = true;
-  canvas.addEventListener('mousemove', (e) => {
-    const i = podAtClient(e.clientX, e.clientY);
-    const a = i >= 0 ? agents[i] : null;
-    const chat = a && (a.task || a.chatName || a.lastPrompt);
-    if (!chat) {
-      hideTooltip();
-      return;
-    }
-    const tip = ensureTooltip();
-    const t = colorFor(a.model);
-    let sub = a.model ? escapeHtml(shortModel(a.model)) : '';
-    if (a.lastPrompt && a.lastPrompt !== chat) {
-      sub += `${sub ? ' · ' : ''}${escapeHtml(a.lastPrompt)}`;
-    }
-    tip.innerHTML =
-      `<div class="tt-name">${escapeHtml(chat)}</div>` + (sub ? `<div class="tt-sub">${sub}</div>` : '');
-    tip.style.display = 'block';
-    // Position just above/right of the cursor; lift it so it clears the monitor.
-    tip.style.left = `${e.clientX + 12}px`;
-    tip.style.top = `${e.clientY - tip.offsetHeight - 8}px`;
+function updateHover(clientX, clientY) {
+  const i = podAt(clientX, clientY);
+  hoverIdx = i;
+  showCardFor(i >= 0 ? i : selIdx);
+  if (!panning) viewport.style.cursor = i >= 0 ? 'pointer' : 'grab';
+}
+
+// Select the desk under a point. A plain tap toggles (click the selected desk
+// to deselect); `force` always selects (used by double-click-to-zoom).
+function selectAt(clientX, clientY, force) {
+  const i = podAt(clientX, clientY);
+  if (i >= 0 && (force || i !== selIdx)) {
+    selIdx = i; selKey = keyOf(agents[i]);
+  } else {
+    selIdx = -1; selKey = null;
+  }
+  showCardFor(hoverIdx >= 0 ? hoverIdx : selIdx);
+}
+
+// ---- in-world name tags --------------------------------------------------
+
+function dotClassFor(a) {
+  return a.activity === 'working' ? 'busy'
+    : a.activity === 'shell' ? 'shell'
+    : a.state === 'done' ? 'done' : 'idle';
+}
+
+function buildLabels() {
+  labelLayer.innerHTML = '';
+  agents.forEach((a, i) => {
+    const o = podOrigin(i);
+    const c = colorFor(a.model);
+    const first = String(a.name || '').split(/\s+/)[0] || a.name || '—';
+    const el = document.createElement('div');
+    el.className = 'tag';
+    el.dataset.i = String(i);
+    el.style.left = `${o.x + POD_W / 2}px`;
+    el.style.top = `${o.y + POD_H + 4}px`;
+    el.innerHTML =
+      `<span class="dot ${dotClassFor(a)}"></span>` +
+      `<span class="tag-name">${escapeHtml(first)}</span>` +
+      `<span class="tag-chip" style="background:${c.screen}"></span>`;
+    labelLayer.appendChild(el);
   });
-  canvas.addEventListener('mouseleave', hideTooltip);
+}
+
+// ---- hover / selection info card -----------------------------------------
+
+function showCardFor(idx) {
+  cardIdx = idx;
+  const a = idx >= 0 ? agents[idx] : null;
+  if (!a) { card.style.display = 'none'; return; }
+  const c = colorFor(a.model);
+
+  let statusClass, statusText, statusIcon;
+  if (a.activity === 'working') { statusClass = 'working'; statusIcon = '🟢'; statusText = 'shipping'; }
+  else if (a.activity === 'shell') { statusClass = 'shell'; statusIcon = '⚙'; statusText = 'running a command'; }
+  else if (a.state === 'done') { statusClass = 'done'; statusIcon = '✓'; statusText = 'done'; }
+  else { statusClass = 'idle'; statusIcon = '💤'; statusText = 'idle'; }
+
+  const task = a.task || a.chatName || a.lastPrompt;
+  const taskHtml = task ? `: <span class="ic-task">"${escapeHtml(task)}"</span>` : '';
+  const subN = (a.subagents || []).length;
+  const subBadge = subN ? `<span class="ic-sub-badge">🤖 ${subN} subagent${subN > 1 ? 's' : ''}</span>` : '';
+  const srcBadge = a.source === 'opencode'
+    ? `<span class="ic-oc">opencode</span>`
+    : a.source === 'codex'
+      ? `<span class="ic-codex">codex</span>`
+      : '';
+  const slugBadge = a.modelSlug ? `<span class="ic-slug">slug: ${escapeHtml(a.modelSlug)}</span>` : '';
+
+  card.innerHTML =
+    `<div class="ic-head"><span class="dot ${dotClassFor(a)}"></span>` +
+      `<span class="ic-name">${escapeHtml(a.name)}</span>` +
+      `<span class="ic-tier" style="color:${c.screen}">${escapeHtml(shortModel(a.model))}</span></div>` +
+    `<div class="ic-sub">${escapeHtml(a.title)} · <span class="ic-dept">${escapeHtml(a.project)}</span></div>` +
+    `<div class="ic-status ${statusClass}">${statusIcon} ${statusText}${taskHtml}</div>` +
+    `<div class="ic-foot"><span class="ic-up">⏱ ${fmtUptime(uptimeOf(a))}</span>${subBadge}${srcBadge}${slugBadge}</div>`;
+
+  card.style.display = 'block';
+  positionCard(idx);
+}
+
+// Live uptime — count up from startedAt between polls; fall back to the
+// server's snapshot if startedAt is missing.
+function uptimeOf(a) {
+  if (!a) return null;
+  return a.startedAt ? Date.now() - a.startedAt : a.uptimeMs;
+}
+
+// Anchor the card above (or below, if cramped) the agent's head, in
+// viewport-local coords, clamped to stay on screen.
+function positionCard(idx) {
+  if (idx < 0 || !agents[idx] || card.style.display === 'none') return;
+  const o = podOrigin(idx);
+  const cx = cam.x + (o.x + POD_W / 2) * cam.s;
+  const topY = cam.y + (o.y + 2) * cam.s;
+  const botY = cam.y + (o.y + POD_H - 8) * cam.s;
+  const vw = viewport.clientWidth;
+  const cw = card.offsetWidth || 180;
+  const ch = card.offsetHeight || 96;
+
+  const below = topY - ch - 8 < 4;
+  card.classList.toggle('below', below);
+  const left = clamp(cx, cw / 2 + 6, vw - cw / 2 - 6);
+  card.style.left = `${left}px`;
+  card.style.top = `${below ? botY : topY}px`;
+}
+
+function tickUptimes() {
+  // Advance only the uptime text so the dot/status animations aren't reset.
+  if (cardIdx < 0 || !agents[cardIdx] || card.style.display === 'none') return;
+  const up = card.querySelector('.ic-up');
+  if (up) up.textContent = `⏱ ${fmtUptime(uptimeOf(agents[cardIdx]))}`;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 // ---- scene ---------------------------------------------------------------
@@ -394,6 +579,18 @@ function loop(t) {
         // vacant desk
         drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
       }
+    }
+
+    // hover / selection highlights, painted over the workers
+    if (hoverIdx >= 0 && hoverIdx !== selIdx && agents[hoverIdx]) {
+      const o = podOrigin(hoverIdx);
+      drawSelectRing(ctx, o.x, o.y, '#5cd0ff', frame, false);
+    }
+    if (selIdx >= 0 && agents[selIdx]) {
+      const o = podOrigin(selIdx);
+      const c = colorFor(agents[selIdx].model);
+      drawSelectRing(ctx, o.x, o.y, c.screen, frame, true);
+      drawPlumbob(ctx, o.x + 22, o.y, frame);
     }
   }
   requestAnimationFrame(loop);

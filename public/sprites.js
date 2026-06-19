@@ -16,6 +16,7 @@ export const MODEL_COLORS = {
 export function colorFor(model) {
   if (!model) return MODEL_COLORS.opus;
   const m = model.toLowerCase();
+  if (m.includes('codex')) return { screen: '#ff8a3d', glow: 'rgba(255,138,61,0.25)', code: '#ffe0c9' };
   if (m.includes('opus') || m.includes('fable')) return MODEL_COLORS.opus;
   if (m.includes('sonnet')) return MODEL_COLORS.sonnet;
   if (m.includes('haiku')) return MODEL_COLORS.haiku;
@@ -383,4 +384,38 @@ export function drawHead(ctx, x, y, { skin = '#f0c8a0', hair = '#2b2233', shirt 
   px(ctx, x + 2, y + 4, 1, 1, '#1a1a22');
   px(ctx, x + 5, y + 4, 1, 1, '#1a1a22');
   px(ctx, x, y + 6, 8, 3, shirt);
+}
+
+// Sims-style selection brackets drawn just inside a pod's bounds. `strong`
+// (the selected agent) also gets a faint full outline that pulses.
+export function drawSelectRing(ctx, px0, py0, color, frame, strong) {
+  const x0 = px0 + 1, y0 = py0 + 1, x1 = px0 + POD_W - 2, y1 = py0 + POD_H - 2;
+  const L = 7;
+  ctx.globalAlpha = strong ? 1 : 0.55;
+  ctx.fillStyle = color;
+  // four L-shaped corner brackets
+  ctx.fillRect(x0, y0, L, 1); ctx.fillRect(x0, y0, 1, L); // top-left
+  ctx.fillRect(x1 - L + 1, y0, L, 1); ctx.fillRect(x1, y0, 1, L); // top-right
+  ctx.fillRect(x0, y1, L, 1); ctx.fillRect(x0, y1 - L + 1, 1, L); // bottom-left
+  ctx.fillRect(x1 - L + 1, y1, L, 1); ctx.fillRect(x1, y1 - L + 1, 1, L); // bottom-right
+  if (strong) {
+    ctx.globalAlpha = frame % 4 < 2 ? 0.18 : 0.1; // gentle pulse
+    ctx.fillRect(x0, y0, x1 - x0, 1); ctx.fillRect(x0, y1, x1 - x0, 1);
+    ctx.fillRect(x0, y0, 1, y1 - y0); ctx.fillRect(x1, y0, 1, y1 - y0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// A little bobbing green plumbob hovering above the selected worker's head.
+export function drawPlumbob(ctx, cx, podTopY, frame) {
+  const bob = frame % 8 < 4 ? 0 : 1;
+  const y = podTopY - 7 - bob;
+  const g = '#39d98a', hl = '#9affc4', dk = '#1f8a5a';
+  px(ctx, cx - 1, y, 2, 1, g);
+  px(ctx, cx - 2, y + 1, 4, 1, g);
+  px(ctx, cx - 3, y + 2, 6, 1, g);
+  px(ctx, cx - 2, y + 3, 4, 1, g);
+  px(ctx, cx - 1, y + 4, 2, 1, g);
+  px(ctx, cx - 1, y + 1, 1, 2, hl); // highlight
+  px(ctx, cx + 1, y + 2, 1, 1, dk); // shade
 }

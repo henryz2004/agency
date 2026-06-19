@@ -13,6 +13,7 @@ import { identityFor } from './lib/roster.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4313;
+const HOST = process.env.HOST || '127.0.0.1';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -82,7 +83,7 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   // Warm the usage cache so the first request is fast.
   try {
     getUsage();
@@ -90,5 +91,5 @@ server.listen(PORT, () => {
     /* ignore */
   }
   console.log(`\n  🏢  Agency is open for business.`);
-  console.log(`      → http://localhost:${PORT}\n`);
+  console.log(`      → http://${HOST}:${PORT}\n`);
 });

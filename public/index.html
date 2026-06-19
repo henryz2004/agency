@@ -42,16 +42,15 @@
   <main class="layout">
     <section class="floor-col">
       <div class="floor-frame">
-        <canvas id="office"></canvas>
-        <div id="labels" class="label-layer"></div>
+        <div class="world" id="world">
+          <canvas id="office"></canvas>
+          <div id="labels" class="label-layer"></div>
+        </div>
         <div id="emptyBanner" class="empty-banner hidden">
-          No agents on the floor — run <code>claude</code> in any project to hire one.
+          No agents on the floor — run <code>claude</code>, <code>codex</code>, or <code>opencode</code> in any project to hire one.
         </div>
-        <div class="zoom-controls">
-          <button id="zoomOut" type="button" title="Zoom out">−</button>
-          <button id="zoomFit" type="button" title="Fit to window">⛶</button>
-          <button id="zoomIn" type="button" title="Zoom in">+</button>
-        </div>
+        <button id="recenter" class="recenter" type="button" title="Recenter the floor">⌖ recenter</button>
+        <div class="floor-hint" id="floorHint">drag to pan · scroll to move · ⌘/pinch to zoom · click a desk for details</div>
       </div>
       <div class="ticker"><div class="ticker-track" id="tickerTrack"></div></div>
     </section>
