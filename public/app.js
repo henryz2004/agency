@@ -6,6 +6,7 @@ import { initOffice, setAgents } from './render.js';
 import { drawHead, colorFor } from './sprites.js';
 import { initSoundPref, toggleSound, updateSound } from './sound.js';
 import { initUI } from './ui.js';
+import { mockEnabled, getMockState } from './mock.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,6 +71,11 @@ function comma(n) {
 let STATE = null;
 
 async function poll() {
+  if (mockEnabled) {
+    STATE = getMockState(); // synthetic data — iterate on the UI with no agents
+    onState();
+    return;
+  }
   try {
     const res = await fetch('/api/state', { cache: 'no-store' });
     STATE = await res.json();
@@ -431,6 +437,11 @@ window.addEventListener('resize', () => {
     renderDaily(STATE.usage);
   }
 });
+
+if (mockEnabled) {
+  const sub = document.querySelector('.brand-sub');
+  if (sub) sub.textContent = 'MOCK MODE — synthetic data';
+}
 
 poll();
 setInterval(poll, 3000);

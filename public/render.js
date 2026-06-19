@@ -5,8 +5,9 @@
 // on hover / click.
 
 import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, colorFor } from './sprites.js';
+import { sheetReady, blit, blitStanding, sprW } from './office-atlas.js';
 
-const WALL_H = 40;
+const WALL_H = 72; // back-wall band: tall enough for standing furniture + windows
 const MARGIN = 14;
 const COL_GAP = 14; // horizontal breathing room between desks
 const ROW_GAP = 34; // vertical band beneath each desk that holds its name tag
@@ -553,11 +554,63 @@ function drawFloor() {
   }
 }
 
+// Furnished room from the CC0 PixelOffice sheet: blue-tile floor, light back
+// wall with tiled windows + wall decor, and a row of amenities (vending, water
+// cooler, plants, couch, printer) standing against the wall. Falls back to the
+// procedural night office until the sheet finishes loading.
+function drawRoom() {
+  if (!sheetReady()) { drawFloor(); drawWall(); return; }
+
+  // --- floor: bright blue tile w/ offset brick mortar (matches the pack) ---
+  ctx.fillStyle = '#3a9fe0';
+  ctx.fillRect(0, WALL_H, bufW, bufH - WALL_H);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  for (let y = WALL_H; y < bufH; y += 12) ctx.fillRect(0, y, bufW, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  for (let y = WALL_H; y < bufH; y += 12) {
+    const off = ((y / 12) | 0) % 2 ? 0 : 18;
+    for (let x = off; x < bufW; x += 36) ctx.fillRect(x, y, 1, 11);
+  }
+
+  // --- back wall: light interior panel w/ baseboard ---
+  ctx.fillStyle = '#cdd3da';
+  ctx.fillRect(0, 0, bufW, WALL_H);
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  for (let y = 9; y < WALL_H - 6; y += 9) ctx.fillRect(0, y, bufW, 1);
+  ctx.fillStyle = '#aeb5bf';
+  ctx.fillRect(0, WALL_H - 3, bufW, 3); // baseboard
+
+  // windows tiled along the upper wall to fill any width
+  const winStep = 46;
+  for (let x = 10; x + sprW('windowWide') < bufW - 6; x += winStep) {
+    blit(ctx, 'windowWide', x, 6);
+  }
+  // a few wall hangings between the windows
+  blit(ctx, 'clock', Math.round(bufW / 2 - 9), 9);
+  if (bufW > 120) {
+    blit(ctx, 'flagUS', 30, 30);
+    blit(ctx, 'flagUK', 46, 30);
+    blit(ctx, 'picture', bufW - 26, 28);
+    blit(ctx, 'whiteboard', bufW - 64, 8);
+  }
+
+  // --- amenities standing on the wall/floor line (feet at WALL_H) ---
+  const base = WALL_H + 1;
+  let x = 6;
+  x += blitStanding(ctx, 'vendDrink', x, base) + 2;
+  x += blitStanding(ctx, 'vendSnack', x, base) + 4;
+  x += blitStanding(ctx, 'waterCooler', x, base) + 6;
+  blitStanding(ctx, 'plant', x, base);
+  // right side: a couch + printer + a plant
+  blitStanding(ctx, 'printer', bufW - 22, base);
+  blitStanding(ctx, 'plant', bufW - 42, base);
+  if (bufW > 200) blitStanding(ctx, 'couchBlue', Math.round(bufW * 0.46), base);
+}
+
 function loop(t) {
   frame = Math.floor(t / 130); // ~7.7fps "typing" cadence
   if (ctx && bufW) {
-    drawFloor();
-    drawWall();
+    drawRoom();
 
     const slots = totalSlots();
     for (let i = 0; i < slots; i++) {
