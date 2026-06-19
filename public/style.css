@@ -131,6 +131,12 @@ html, body {
 }
 .tag-name { font-size: 13px; color: var(--ink); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
 .tag-chip { width: 6px; height: 6px; border-radius: 1px; flex: 0 0 auto; }
+/* gold "PM" pill on the lead's nameplate (matches the in-world crown) */
+.tag-lead {
+  font-family: var(--pixel); font-size: 6px; line-height: 1; letter-spacing: 1px;
+  color: #2a1f05; background: var(--gold); border-radius: 2px;
+  padding: 1px 2px; flex: 0 0 auto;
+}
 
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .dot.busy { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 1.1s infinite; }
@@ -151,6 +157,16 @@ html, body {
 .ic-head { display: flex; align-items: center; gap: 6px; }
 .ic-name { font-size: 18px; color: var(--gold); line-height: 1; }
 .ic-tier { font-family: var(--pixel); font-size: 7px; letter-spacing: 1px; text-transform: uppercase; margin-left: auto; }
+/* role tags in the card head: PM gold, teammate cyan */
+.ic-lead, .ic-teammate {
+  font-family: var(--pixel); font-size: 6px; line-height: 1; letter-spacing: 1px;
+  border-radius: 2px; padding: 2px 3px;
+}
+.ic-lead { color: #2a1f05; background: var(--gold); }
+.ic-teammate { color: #06231f; background: var(--cyan); }
+/* push the model tier to the far right even with a role tag present */
+.ic-head .ic-lead, .ic-head .ic-teammate { margin-left: 4px; }
+.ic-head .ic-lead + .ic-tier, .ic-head .ic-teammate + .ic-tier { margin-left: 6px; }
 .ic-sub { font-size: 14px; color: var(--muted); margin-top: 3px; }
 .ic-sub .ic-dept { color: var(--cyan); }
 .ic-status { font-size: 14px; margin-top: 4px; color: var(--ink); }

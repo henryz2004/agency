@@ -4,7 +4,7 @@
 // overlap. Full per-agent detail surfaces in a readable, screen-space info card
 // on hover / click.
 
-import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, colorFor } from './sprites.js';
+import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, colorFor, teamColorHex } from './sprites.js';
 import { sheetReady, blit, blitStanding, sprW } from './office-atlas.js';
 
 const WALL_H = 72; // back-wall band: tall enough for standing furniture + windows
@@ -98,6 +98,18 @@ export function setAgents(next) {
 function keyOf(a) {
   if (!a) return null;
   return a.sessionId || (a.pid != null ? `pid:${a.pid}` : null);
+}
+
+// A stable per-agent sprite seed. Real sessions key off pid; in-process
+// teammates have no pid, so we hash their stable key (agentId/sessionId) — that
+// way their look (hair, build, desk clutter) doesn't reshuffle every poll.
+function seedOf(a, i) {
+  if (a && a.pid) return a.pid | 0;
+  const k = keyOf(a);
+  if (!k) return i + 1;
+  let h = 2166136261 >>> 0;
+  for (let j = 0; j < k.length; j++) { h ^= k.charCodeAt(j); h = Math.imul(h, 16777619) >>> 0; }
+  return (h % 100000) + 1;
 }
 
 // ---- layout + camera -----------------------------------------------------
@@ -374,10 +386,15 @@ function buildLabels() {
     el.dataset.i = String(i);
     el.style.left = `${o.x + POD_W / 2}px`;
     el.style.top = `${o.y + POD_H + 4}px`;
+    // the lead's nameplate gets a small gold "PM" tag; teammate chips wear the
+    // team color so the roster groups read at a glance.
+    const leadTag = a.role === 'lead' ? `<span class="tag-lead">PM</span>` : '';
+    const chip = (a.role === 'teammate' && teamColorHex(a.teamColor)) || c.screen;
     el.innerHTML =
       `<span class="dot ${dotClassFor(a)}"></span>` +
       `<span class="tag-name">${escapeHtml(first)}</span>` +
-      `<span class="tag-chip" style="background:${c.screen}"></span>`;
+      leadTag +
+      `<span class="tag-chip" style="background:${chip}"></span>`;
     labelLayer.appendChild(el);
   });
 }
@@ -406,10 +423,15 @@ function showCardFor(idx) {
       ? `<span class="ic-codex">codex</span>`
       : '';
   const slugBadge = a.modelSlug ? `<span class="ic-slug">slug: ${escapeHtml(a.modelSlug)}</span>` : '';
+  const roleTag = a.role === 'lead'
+    ? `<span class="ic-lead">PM</span>`
+    : a.role === 'teammate'
+      ? `<span class="ic-teammate">teammate</span>`
+      : '';
 
   card.innerHTML =
     `<div class="ic-head"><span class="dot ${dotClassFor(a)}"></span>` +
-      `<span class="ic-name">${escapeHtml(a.name)}</span>` +
+      `<span class="ic-name">${escapeHtml(a.name)}</span>` + roleTag +
       `<span class="ic-tier" style="color:${c.screen}">${escapeHtml(shortModel(a.model))}</span></div>` +
     `<div class="ic-sub">${escapeHtml(a.title)} · <span class="ic-dept">${escapeHtml(a.project)}</span></div>` +
     `<div class="ic-status ${statusClass}">${statusIcon} ${statusText}${taskHtml}</div>` +
@@ -595,16 +617,58 @@ function drawRoom() {
   }
 
   // --- amenities standing on the wall/floor line (feet at WALL_H) ---
+  // Left bay: the "kitchenette" stack (vending + water cooler), capped by a
+  // shredder and a plant. Right bay: the printer + a plant. Center (wide rooms
+  // only): a small lounge so the floor reads lived-in rather than just desks.
   const base = WALL_H + 1;
   let x = 6;
   x += blitStanding(ctx, 'vendDrink', x, base) + 2;
   x += blitStanding(ctx, 'vendSnack', x, base) + 4;
-  x += blitStanding(ctx, 'waterCooler', x, base) + 6;
+  x += blitStanding(ctx, 'waterCooler', x, base) + 5;
+  x += blitStanding(ctx, 'shredder', x, base) + 6;
   blitStanding(ctx, 'plant', x, base);
-  // right side: a couch + printer + a plant
+  // right side: printer + a plant
   blitStanding(ctx, 'printer', bufW - 22, base);
   blitStanding(ctx, 'plant', bufW - 42, base);
-  if (bufW > 200) blitStanding(ctx, 'couchBlue', Math.round(bufW * 0.46), base);
+
+  // --- lounge / lobby cluster (needs room; tucked along the back wall line) ---
+  // ponytail: placed center-right at the wall line so it never sits under a desk
+  // pod (pods start a full MARGIN below WALL_H). On wide floors it's a couch +
+  // bench + plant; on medium floors just the wide couch. Skipped when narrow so
+  // it can't collide with the kitchenette/printer bays above.
+  if (bufW > 380) {
+    // roomiest floors: couch + plant + the long bench
+    let cxp = Math.round(bufW * 0.40);
+    cxp += blitStanding(ctx, 'couchGrayWide', cxp, base) + 4;
+    cxp += blitStanding(ctx, 'plant', cxp, base) + 5;
+    blitStanding(ctx, 'benchRedLong', cxp, base);
+  } else if (bufW > 320) {
+    let cxp = Math.round(bufW * 0.42);
+    cxp += blitStanding(ctx, 'couchGrayWide', cxp, base) + 4;
+    cxp += blitStanding(ctx, 'plant', cxp, base) + 5;
+    blitStanding(ctx, 'benchRed', cxp, base);
+  } else if (bufW > 220) {
+    blitStanding(ctx, 'couchGrayWide', Math.round(bufW * 0.46), base);
+  }
+}
+
+// Light sheet props on an occupied desk, varied by pod index so the floor isn't
+// uniform. A tray sits on the far-left corner (clear of the worker's left hand,
+// which is at px0+11) and a folder on the right-front corner (below the monitor
+// stand). Both rest their feet on the desk's front edge (deskTop+9) so they read
+// as sitting on the near lip of the desk. No-op until the sheet has loaded.
+// ponytail: which desks get which prop is keyed off the index (a fixed pattern)
+// rather than the agent's seed — keeps it deterministic and easy for the PM to
+// eyeball; tune the cadence/placement if it reads too busy or too sparse.
+function drawDeskProps(px0, py0, i) {
+  if (!sheetReady()) return;
+  const deskTop = py0 + 50;
+  const lip = deskTop + 9; // feet rest on the desk's front edge band
+  const trays = ['trayA', 'trayB'];
+  const folders = ['folderRed', 'folderBlue', 'folderGreen'];
+  // ~2/3 of desks carry a left tray; folders cycle so colors vary down the rows.
+  if (i % 3 !== 2) blitStanding(ctx, trays[i % trays.length], px0 + 2, lip);
+  if (i % 2 === 0) blitStanding(ctx, folders[i % folders.length], px0 + POD_W - 15, lip);
 }
 
 function loop(t) {
@@ -617,17 +681,22 @@ function loop(t) {
       const o = podOrigin(i);
       const a = agents[i];
       if (a) {
+        // background teammates wear their team color; everyone else keeps their
+        // roster shirt.
+        const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
         drawWorker(ctx, o.x, o.y, {
           skin: a.skin,
           hair: a.hair,
-          shirt: a.shirt,
+          shirt,
           model: a.model,
           activity: a.activity || 'idle',
           state: a.state,
           subagents: a.subagents || [],
           frame,
-          seed: (a.pid || i + 1) | 0,
+          seed: seedOf(a, i),
         });
+        drawDeskProps(o.x, o.y, i); // sheet props on the front lip of busy desks
+        if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, o.y, frame); // PM crown
       } else {
         // vacant desk
         drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
@@ -643,7 +712,9 @@ function loop(t) {
       const o = podOrigin(selIdx);
       const c = colorFor(agents[selIdx].model);
       drawSelectRing(ctx, o.x, o.y, c.screen, frame, true);
-      drawPlumbob(ctx, o.x + 22, o.y, frame);
+      // the lead already wears a crown at this spot — keep it visible instead of
+      // painting the selection plumbob over it (the ring still marks selection).
+      if (agents[selIdx].role !== 'lead') drawPlumbob(ctx, o.x + 22, o.y, frame);
     }
   }
   requestAnimationFrame(loop);

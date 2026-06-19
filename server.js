@@ -30,9 +30,20 @@ function buildState() {
   const usage = getUsage();
   const live = getLive();
 
-  // Attach a stable identity to each live agent.
+  // Attach a stable identity to each live agent. In-process teammates keep
+  // their team-config label + subagent_type as name/title (the roster still
+  // supplies a stable avatar palette + hire date), so "cc-internals" reads as
+  // itself rather than a roster-minted persona.
   const agents = live.agents.map((a) => {
     const ident = identityFor(a.sessionId, a.model, a.startedAt);
+    if (a.role === 'teammate') {
+      return {
+        ...a,
+        ...ident,
+        name: a.teammateName || ident.name,
+        title: a.teammateType || ident.title,
+      };
+    }
     return { ...a, ...ident };
   });
 

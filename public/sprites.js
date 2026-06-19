@@ -32,6 +32,17 @@ export function colorFor(model) {
   return { screen, glow, code };
 }
 
+// Team-config member colors are CSS-ish words ("blue", "green", …). Map them to
+// the office palette so a background teammate's shirt reads as its team color.
+const TEAM_COLORS = {
+  blue: '#5d9ce0', green: '#5dc98a', yellow: '#e0b05d', purple: '#a87de0',
+  red: '#e05d5d', orange: '#e0855d', cyan: '#5dc9c9', pink: '#e07db0', gray: '#8a93a6',
+};
+export function teamColorHex(word) {
+  if (!word) return null;
+  return TEAM_COLORS[String(word).toLowerCase()] || null;
+}
+
 function hslToHex(h, s, l) {
   s /= 100; l /= 100;
   const k = n => (n + h / 30) % 12;
@@ -404,6 +415,29 @@ export function drawSelectRing(ctx, px0, py0, color, frame, strong) {
     ctx.fillRect(x0, y0, 1, y1 - y0); ctx.fillRect(x1, y0, 1, y1 - y0);
   }
   ctx.globalAlpha = 1;
+}
+
+// The PM / team lead's distinct marker: a small gold crown bobbing above the
+// head, so the orchestrator reads as "in charge" at a glance vs the workers.
+//
+// ponytail: this is the PM's look — a deliberately SIMPLE default. To restyle
+// (gold ring, "LEAD" pennant, halo, larger desk, …) swap THIS one function;
+// nothing else encodes the lead's appearance. cx = worker center x, podTopY =
+// pod top in buffer coords.
+export function drawLeadBadge(ctx, cx, podTopY, frame) {
+  const bob = frame % 8 < 4 ? 0 : 1;
+  const y = podTopY - 8 - bob;
+  const g = '#ffd166', hl = '#fff0c0', dk = '#c79a2e';
+  // crown band
+  px(ctx, cx - 4, y + 4, 9, 2, g);
+  px(ctx, cx - 4, y + 5, 9, 1, dk); // base shade
+  // three points with little gem dots
+  px(ctx, cx - 4, y + 1, 2, 3, g);
+  px(ctx, cx, y, 2, 4, g);
+  px(ctx, cx + 4, y + 1, 2, 3, g);
+  px(ctx, cx - 4, y + 1, 1, 1, hl); // highlights
+  px(ctx, cx, y, 1, 1, hl);
+  px(ctx, cx, y + 2, 1, 1, '#ff5cba'); // center gem
 }
 
 // A little bobbing green plumbob hovering above the selected worker's head.

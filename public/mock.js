@@ -54,14 +54,19 @@ function tierFor(model) {
 
 // Build the stable cast once.
 const now0 = Date.now();
+const LEAD_SESSION = `mock-lead-${(now0 % 100000).toString(36)}`;
+
 const cast = EMPTY
   ? []
   : Array.from({ length: N }, (_, i) => {
       const base = CAST[i % CAST.length];
       const tier = tierFor(base.model);
+      // slot 0 is the team lead (PM); it also carries a couple of foreground
+      // subagents so the "minions clustered under one worker" path stays visible.
+      const isLead = i === 0;
       return {
         pid: 4000 + i,
-        sessionId: `mock-${i}-${(now0 % 100000).toString(36)}`,
+        sessionId: isLead ? LEAD_SESSION : `mock-${i}-${(now0 % 100000).toString(36)}`,
         source: base.source,
         cwd: `/Users/you/code/${pick(PROJECTS, i)}`,
         project: pick(PROJECTS, i),
@@ -70,7 +75,7 @@ const cast = EMPTY
         modelSlug: base.source === 'opencode' ? `${base.source}/${base.model}` : base.model,
         provider: base.source === 'codex' ? 'openai' : 'anthropic',
         name: `${pick(FIRST, i)} ${pick(LAST, i + 3)}`,
-        title: TITLES[tier],
+        title: isLead ? 'Engineering Manager' : TITLES[tier],
         tier,
         skin: pick(SKINS, i + 1),
         hair: pick(HAIRS, i + 2),
@@ -78,15 +83,61 @@ const cast = EMPTY
         chatName: pick(TASKS, i),
         lastPrompt: pick(TASKS, i + 4),
         task: null,
+        role: isLead ? 'lead' : null, // marks the orchestrator → distinct render
+        teamColor: null,
         hiredAt: now0 - rint(40) * 86400e3,
         // varied ages so uptime labels differ (minutes → hours)
         startedAt: now0 - (60e3 + rint(5 * 3600e3)),
         // director-controlled, seeded so the first frame is already varied:
         activity: ['working', 'shell', 'idle'][i % 3],
         state: i === 5 ? 'done' : null,
-        subagents: i % 4 === 0 ? [{ type: 'agent' }, { type: 'agent' }] : [],
+        // lead always shows 1-2 foreground minions; others occasionally do.
+        subagents: isLead
+          ? [{ type: 'general-purpose' }, { type: 'general-purpose' }]
+          : i % 4 === 0 ? [{ type: 'agent' }, { type: 'agent' }] : [],
       };
     });
+
+// Two in-process teammates the lead launched with run_in_background:true. They
+// have no pid (mirrors real teammates) and render as INDIVIDUAL workers, shirted
+// by their team color. Mirrors lib/live.js buildTeammate() + the server's
+// teammate identity merge (name = config label, title = subagent_type).
+const TEAMMATE_DEFS = EMPTY
+  ? []
+  : [
+      { name: 'cc-internals', color: 'blue', model: 'claude-opus-4-8', task: 'scout Claude Code internals' },
+      { name: 'sprite-audit', color: 'green', model: 'claude-sonnet-4-6', task: 'audit the sprite sheet' },
+    ];
+const teammates = TEAMMATE_DEFS.map((t, k) => ({
+  pid: null,
+  sessionId: `${t.name}@${LEAD_SESSION}`,
+  source: 'claude',
+  cwd: '/Users/you/code/startup-agency',
+  project: 'startup-agency',
+  kind: 'teammate',
+  model: t.model,
+  modelSlug: t.model,
+  provider: 'anthropic',
+  name: t.name, // config label, preserved over any roster name
+  title: 'general-purpose', // = subagent_type
+  tier: tierFor(t.model),
+  skin: pick(SKINS, k + 2),
+  hair: pick(HAIRS, k + 1),
+  shirt: pick(SHIRTS, k + 4), // overridden by teamColor at draw time
+  chatName: null,
+  lastPrompt: t.task,
+  task: null,
+  role: 'teammate',
+  teamColor: t.color,
+  teammateName: t.name,
+  teammateType: 'general-purpose',
+  hiredAt: now0 - rint(10) * 86400e3,
+  startedAt: now0 - (120e3 + rint(2 * 3600e3)),
+  activity: 'working',
+  state: null,
+  subagents: [],
+}));
+if (cast.length) cast.push(...teammates);
 
 // ---- the director: mutate volatile fields each poll ------------------------
 
@@ -94,6 +145,13 @@ function direct(a) {
   if (a.state === 'done') { a.activity = 'idle'; a.subagents = []; return; }
   const r = Math.random();
   a.activity = r < 0.5 ? 'working' : r < 0.75 ? 'shell' : 'idle';
+  // The lead keeps a steady clutch of foreground minions (it's orchestrating);
+  // teammates are individual workers and never cluster minions of their own.
+  if (a.role === 'lead') {
+    a.subagents = Array.from({ length: 1 + rint(2) }, () => ({ type: 'general-purpose' }));
+    return;
+  }
+  if (a.role === 'teammate') { a.subagents = []; return; }
   a.subagents = a.activity === 'working' && Math.random() < 0.5
     ? Array.from({ length: 1 + rint(3) }, () => ({ type: 'agent' }))
     : [];
@@ -159,8 +217,44 @@ export function getMockState() {
     .map((a) => ({ ...a, uptimeMs: a.startedAt ? Math.max(0, now - a.startedAt) : null }))
     .sort((x, y) => (y.uptimeMs || 0) - (x.uptimeMs || 0));
 
-  const teams = cast.length >= 3
-    ? [{ name: 'launch-squad', members: agents.slice(0, 3).map((a) => ({ name: a.name, agentType: a.title, cwd: a.cwd })) }]
+  // Enriched team record matching lib/live.js readTeams(): a lead member plus
+  // the in-process teammates, each with the per-member fields the frontend now
+  // reads (color/model/agentType/isLead).
+  const teams = cast.length
+    ? [
+        {
+          name: 'launch-squad',
+          createdAt: now0 - 3600e3,
+          leadAgentId: `team-lead@${LEAD_SESSION}`,
+          leadSessionId: LEAD_SESSION,
+          members: [
+            {
+              agentId: `team-lead@${LEAD_SESSION}`,
+              name: 'team-lead',
+              color: null,
+              model: cast[0].model,
+              agentType: 'team-lead',
+              prompt: null,
+              backendType: 'in-process',
+              cwd: cast[0].cwd,
+              joinedAt: now0 - 3600e3,
+              isLead: true,
+            },
+            ...TEAMMATE_DEFS.map((t) => ({
+              agentId: `${t.name}@${LEAD_SESSION}`,
+              name: t.name,
+              color: t.color,
+              model: t.model,
+              agentType: 'general-purpose',
+              prompt: t.task,
+              backendType: 'in-process',
+              cwd: '/Users/you/code/startup-agency',
+              joinedAt: now0 - 1800e3,
+              isLead: false,
+            })),
+          ],
+        },
+      ]
     : [];
 
   return { generatedAt: now, live: { agents, teams, now }, usage };
