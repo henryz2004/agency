@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { getUsage } from './lib/usage.js';
 import { getLive } from './lib/live.js';
 import { identityFor } from './lib/roster.js';
+import { getTranscript } from './lib/transcript.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -74,8 +75,23 @@ function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   try {
-    if (req.url.split('?')[0] === '/api/state') {
+    const q = req.url.indexOf('?');
+    const pathname = q === -1 ? req.url : req.url.slice(0, q);
+    const query = q === -1 ? '' : req.url.slice(q + 1);
+    if (pathname === '/api/state') {
       sendJSON(res, 200, buildState());
+      return;
+    }
+    // Read-only peek at the tail of a session's transcript (for the chat panel).
+    if (pathname === '/api/transcript') {
+      const params = new URLSearchParams(query);
+      const sessionId = params.get('sessionId');
+      const cwd = params.get('cwd');
+      if (!sessionId || !cwd) {
+        sendJSON(res, 400, { error: 'sessionId and cwd are required' });
+        return;
+      }
+      sendJSON(res, 200, getTranscript(sessionId, cwd));
       return;
     }
     serveStatic(req, res);
