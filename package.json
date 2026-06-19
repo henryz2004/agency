@@ -6,7 +6,7 @@
   "description": "A live pixel-art office sim of your Claude Code, Codex, and opencode workforce.",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check public/app.js && node --check public/render.js && node --check public/sprites.js && node --check public/ui.js && node --check public/sound.js && node --check public/mock.js"
+    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check public/app.js && node --check public/chat-panel.js && node --check public/render.js && node --check public/sprites.js && node --check public/ui.js && node --check public/sound.js && node --check public/mock.js"
   },
   "engines": {
     "node": ">=18"

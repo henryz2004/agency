@@ -7,6 +7,7 @@ import { drawHead, colorFor } from './sprites.js';
 import { initSoundPref, toggleSound, updateSound } from './sound.js';
 import { initUI } from './ui.js';
 import { mockEnabled, getMockState } from './mock.js';
+import { initChatPanel } from './chat-panel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,7 @@ const office = $('office');
 const labels = $('labels');
 initOffice(office, labels);
 initUI();
+initChatPanel(); // read-only "open agent's chat" peek panel (listens for agency:select)
 
 // ---- assumptions (persisted) ---------------------------------------------
 
