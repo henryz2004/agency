@@ -92,7 +92,7 @@ function onState() {
   setAgents(live.agents);
 
   $('tsLive').textContent = live.agents.length;
-  $('tsBusy').textContent = live.agents.filter((a) => a.status === 'busy').length;
+  $('tsBusy').textContent = live.agents.filter((a) => a.activity === 'working').length;
   $('tsTeams').textContent = (live.teams || []).filter((t) => (t.members || []).length > 1).length;
   $('emptyBanner').classList.toggle('hidden', live.agents.length > 0);
 
@@ -315,8 +315,10 @@ function renderTicker() {
     const up = fmtUptimeShort(a.uptimeMs);
     const subN = (a.subagents || []).length;
     const sub = subN ? ` · 🤖 ${subN} subagent${subN > 1 ? 's' : ''}` : '';
-    if (a.status === 'busy') {
+    if (a.activity === 'working') {
       items.push(`🟢 <b>${name}</b> (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${tl}${sub} · up ${up}`);
+    } else if (a.activity === 'shell') {
+      items.push(`⚙ <b>${name}</b> running a command in <b>${proj}</b>${label ? ` — ${label}` : ''}${sub} · up ${up}`);
     } else if (a.state === 'done') {
       items.push(`✅ <b>${name}</b> finished${label ? ` ${label}` : ''} in ${proj} · up ${up}`);
     } else {

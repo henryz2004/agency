@@ -87,10 +87,12 @@ function buildLabels() {
     el.className = 'plate';
     el.dataset.i = String(i);
     const t = TIER[a.tier] || TIER.unknown;
-    const dotClass = a.status === 'busy' ? 'busy' : a.state === 'done' ? 'done' : 'idle';
+    const dotClass =
+      a.activity === 'working' ? 'busy' : a.activity === 'shell' ? 'shell' : a.state === 'done' ? 'done' : 'idle';
     const label = a.task || a.chatName || a.lastPrompt;
     const taskLine = label ? `<div class="plate-task" title="${escapeHtml(label)}">“${escapeHtml(label)}”</div>` : '';
     const doneBadge = a.state === 'done' ? ' <span class="plate-badge done">✓ done</span>' : '';
+    const runBadge = a.activity === 'shell' ? ' <span class="plate-badge run">⚙ shell</span>' : '';
     const subN = (a.subagents || []).length;
     const subBadge = subN ? ` <span class="plate-badge sub">🤖 ${subN} subagent${subN > 1 ? 's' : ''}</span>` : '';
     el.innerHTML = `
@@ -101,7 +103,7 @@ function buildLabels() {
       </div>
       <div class="plate-sub">${escapeHtml(a.title)} · <span class="dept">${escapeHtml(a.project)}</span></div>
       ${taskLine}
-      <div class="plate-up">⏱ <span class="up" data-started="${a.startedAt || ''}">${fmtUptime(a.uptimeMs)}</span>${doneBadge}${subBadge}</div>
+      <div class="plate-up">⏱ <span class="up" data-started="${a.startedAt || ''}">${fmtUptime(a.uptimeMs)}</span>${doneBadge}${runBadge}${subBadge}</div>
     `;
     labelLayer.appendChild(el);
   });
@@ -213,7 +215,7 @@ function loop(t) {
           hair: a.hair,
           shirt: a.shirt,
           tier: a.tier,
-          busy: a.status === 'busy',
+          activity: a.activity || 'idle',
           state: a.state,
           subagents: a.subagents || [],
           frame,

@@ -41,8 +41,12 @@ function shade(hex, amt) {
 // glowing monitor whose color encodes the model tier.
 // (px0, py0) = top-left of the pod cell in buffer coords.
 export function drawWorker(ctx, px0, py0, opts) {
-  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', tier = 'unknown', busy = false, frame = 0, vacant = false, seed = 1, state = null } = opts;
+  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', tier = 'unknown', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null } = opts;
   const t = TIER[tier] || TIER.unknown;
+  // working = model generating (types, tier-colored output on screen);
+  // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
+  const typing = activity === 'working';
+  const shellRunning = activity === 'shell';
 
   const cx = px0 + 22; // worker center x
   const deskTop = py0 + 50;
@@ -64,8 +68,8 @@ export function drawWorker(ctx, px0, py0, opts) {
     // eyes
     px(ctx, cx - 4, py0 + 15, 2, 2, '#1a1a22');
     px(ctx, cx + 2, py0 + 15, 2, 2, '#1a1a22');
-    // mouth (smile when busy)
-    px(ctx, cx - 2, py0 + 19, 4, 1, busy ? shade(skin, -40) : shade(skin, -25));
+    // mouth (focused when generating)
+    px(ctx, cx - 2, py0 + 19, 4, 1, typing ? shade(skin, -40) : shade(skin, -25));
     // neck
     px(ctx, cx - 2, py0 + 21, 4, 3, shade(skin, -15));
 
@@ -76,9 +80,9 @@ export function drawWorker(ctx, px0, py0, opts) {
     px(ctx, cx + 3, py0 + 24, 5, 15, shade(shirt, -28)); // right-side shade
     px(ctx, cx - 1, py0 + 24, 2, 15, shade(shirt, 16)); // collar/placket
 
-    // arms reaching to keyboard (animate hands typing)
-    const lh = busy ? (frame % 2 ? 0 : 1) : 0; // left hand bob
-    const rh = busy ? (frame % 2 ? 1 : 0) : 0; // right hand bob
+    // arms reaching to keyboard — hands only bob while actively generating
+    const lh = typing ? (frame % 2 ? 0 : 1) : 0; // left hand bob
+    const rh = typing ? (frame % 2 ? 1 : 0) : 0; // right hand bob
     px(ctx, cx - 10, py0 + 30, 3, 12, shade(shirt, -10)); // left arm
     px(ctx, cx + 7, py0 + 30, 3, 12, shade(shirt, -10)); // right arm
     px(ctx, cx - 11, deskTop - 4 + lh, 4, 3, skin); // left hand
@@ -103,28 +107,53 @@ export function drawWorker(ctx, px0, py0, opts) {
   // bezel
   px(ctx, mx - 10, mTop, 20, 16, '#0d0f14');
   px(ctx, mx - 10, mTop, 20, 16, '#0d0f14');
-  // screen
-  const screenC = busy || vacant === false ? t.screen : shade(t.screen, -90);
-  px(ctx, mx - 8, mTop + 2, 16, 12, vacant ? '#11141b' : shade(t.screen, busy ? -10 : -55));
-  // code rain
+  // screen background depends on what's happening on it
+  const TERM = '#8bd450'; // terminal green for a running shell
+  if (vacant) {
+    px(ctx, mx - 8, mTop + 2, 16, 12, '#11141b');
+  } else if (typing) {
+    px(ctx, mx - 8, mTop + 2, 16, 12, shade(t.screen, -10)); // model output, tier-tinted
+  } else if (shellRunning) {
+    px(ctx, mx - 8, mTop + 2, 16, 12, '#0b130d'); // dark terminal
+  } else {
+    px(ctx, mx - 8, mTop + 2, 16, 12, shade(t.screen, -70)); // dim
+  }
+  // on-screen content
   if (!vacant) {
-    const rand = rng(seed * 31 + (busy ? frame : 0));
-    const lines = busy ? 5 : 2;
-    for (let i = 0; i < lines; i++) {
-      const ly = mTop + 3 + Math.floor(rand() * 10);
-      const lx = mx - 7 + Math.floor(rand() * 4);
-      const lw = 2 + Math.floor(rand() * 8);
-      px(ctx, lx, ly, Math.min(lw, mx + 7 - lx), 1, busy ? t.code : shade(t.code, -60));
+    if (typing) {
+      // model output: tier-colored code rain
+      const rand = rng(seed * 31 + frame);
+      for (let i = 0; i < 5; i++) {
+        const ly = mTop + 3 + Math.floor(rand() * 10);
+        const lx = mx - 7 + Math.floor(rand() * 4);
+        const lw = 2 + Math.floor(rand() * 8);
+        px(ctx, lx, ly, Math.min(lw, mx + 7 - lx), 1, t.code);
+      }
+    } else if (shellRunning) {
+      // terminal log scrolling upward + a blinking cursor
+      for (let i = 0; i < 4; i++) {
+        const ly = mTop + 3 + ((i * 3 + frame) % 11);
+        const r = rng(seed * 17 + i);
+        const lw = 3 + Math.floor(r() * 8);
+        px(ctx, mx - 7, ly, Math.min(lw, 14), 1, TERM);
+      }
+      if (frame % 2) px(ctx, mx - 7, mTop + 12, 2, 1, TERM);
+    } else {
+      // idle: a couple of dim static lines
+      px(ctx, mx - 7, mTop + 5, 6, 1, shade(t.code, -60));
+      px(ctx, mx - 7, mTop + 9, 4, 1, shade(t.code, -60));
     }
   }
   // stand
   px(ctx, mx - 2, mTop + 16, 4, 3, '#3a4150');
   px(ctx, mx - 5, mTop + 19, 10, 2, '#2b313e');
 
-  // status LED on the desk: green pulse = busy, steady cyan = finished, gray = idle
+  // status LED: green pulse = generating, amber pulse = shell running,
+  // steady cyan = finished, gray = idle
   if (!vacant) {
     let on;
-    if (busy) on = frame % 2 ? '#39d98a' : '#1f7d52';
+    if (typing) on = frame % 2 ? '#39d98a' : '#1f7d52';
+    else if (shellRunning) on = frame % 2 ? '#ffb454' : '#9c6a1f';
     else if (state === 'done') on = '#5cd0ff';
     else on = '#4a5568';
     px(ctx, px0 + 6, deskTop + 2, 3, 3, on);
