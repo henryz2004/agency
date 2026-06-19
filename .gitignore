@@ -1,0 +1,7 @@
+# generated caches + persisted identities (regenerated from ~/.claude)
+data/
+
+# os / editor noise
+.DS_Store
+node_modules/
+*.log

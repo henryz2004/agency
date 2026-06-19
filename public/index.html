@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGENCY · your AI workforce</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="scanlines"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🏢</span>
+      <div class="brand-text">
+        <div class="brand-name" id="brandName">AGENCY</div>
+        <div class="brand-sub">your one-person AI workforce</div>
+      </div>
+    </div>
+    <div class="topstats">
+      <div class="tstat">
+        <div class="tstat-val" id="tsLive">0</div>
+        <div class="tstat-lbl">on the floor</div>
+      </div>
+      <div class="tstat">
+        <div class="tstat-val" id="tsBusy">0</div>
+        <div class="tstat-lbl">shipping now</div>
+      </div>
+      <div class="tstat">
+        <div class="tstat-val" id="tsTeams">0</div>
+        <div class="tstat-lbl">teams</div>
+      </div>
+      <div class="tstat live-pill"><span class="rec"></span> LIVE</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="floor-col">
+      <div class="floor-frame">
+        <canvas id="office"></canvas>
+        <div id="labels" class="label-layer"></div>
+        <div id="emptyBanner" class="empty-banner hidden">
+          No agents on the floor — run <code>claude</code> in any project to hire one.
+        </div>
+      </div>
+      <div class="ticker"><div class="ticker-track" id="tickerTrack"></div></div>
+    </section>
+
+    <aside class="panel">
+      <div class="card headcount-card">
+        <div class="card-title">Effective team size</div>
+        <div class="bignum"><span id="hcNum">0.0</span><span class="bignum-unit">engineers</span></div>
+        <div class="card-note">your recent daily output vs one human's</div>
+        <canvas id="headsCanvas" class="heads"></canvas>
+        <div class="hc-compare" id="hcCompare">1 human operating like a team of —</div>
+        <div class="hc-grid">
+          <div><div class="hc-k" id="mEngYears">—</div><div class="hc-l">eng-years shipped</div></div>
+          <div><div class="hc-k" id="mPayroll">—</div><div class="hc-l">payroll equivalent</div></div>
+          <div><div class="hc-k" id="mToday">—</div><div class="hc-l">eng-days today</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Assumptions <span class="card-title-hint">drag to re-rate</span></div>
+        <div class="slider">
+          <label>Output tokens / engineer-hour <b id="vTok">3,000</b></label>
+          <input type="range" id="sTok" min="500" max="12000" step="250" value="3000" />
+        </div>
+        <div class="slider">
+          <label>Work hours / day <b id="vHrs">8</b></label>
+          <input type="range" id="sHrs" min="4" max="16" step="1" value="8" />
+        </div>
+        <div class="slider">
+          <label>Work days / year <b id="vDays">230</b></label>
+          <input type="range" id="sDays" min="180" max="300" step="5" value="230" />
+        </div>
+        <div class="slider">
+          <label>Avg engineer salary <b id="vSal">$150k</b></label>
+          <input type="range" id="sSal" min="80000" max="400000" step="10000" value="150000" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Model mix <span class="card-title-hint">by output</span></div>
+        <div class="modelbar" id="modelBar"></div>
+        <div class="legend" id="modelLegend"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Departments <span class="card-title-hint">top projects by output</span></div>
+        <div id="deptList" class="deptlist"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Daily output <span class="card-title-hint">last 30 days</span></div>
+        <canvas id="dailyCanvas" class="daily"></canvas>
+      </div>
+
+      <div class="card">
+        <div class="card-title">All-time ledger</div>
+        <div class="ledger" id="ledger"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
