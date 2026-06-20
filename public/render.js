@@ -44,9 +44,20 @@ async function loadCharacters() {
 }
 
 const WALL_H = 72; // back-wall band: tall enough for standing furniture + windows
+// Hybrid opens with a SKY band (clouds) above the wall, like the reference. SKY
+// shifts the whole wall+floor down by this much in hybrid; 0 in the default view.
+const SKY_H = 38; // = sprH('sky')
+const SKY = HYBRID ? SKY_H : 0;
+// Cozy zones (hybrid) framing the central bullpen: a LEFT lounge/branding band
+// and a RIGHT kitchen/meeting band are reserved on the floor; the agent cubicles
+// flow in the centre between them.
+const ZONE_L = 96; // left lounge/branding band width
+const ZONE_R = 120; // right kitchen/meeting band width
+const COZY_ZONE_H = 124; // floor-relative height the cozy zones occupy (drives bufH)
 const MARGIN = 18; // outer breathing room around the whole floor
 const COL_GAP = 12; // horizontal gap between two desks in the same cluster
 const FIT_PAD = 28; // slack left around the office when fitting to the frame
+const HYBRID_FIT = 1.9; // hybrid biases the auto-fit this much closer (de-spacey)
 // (the old ROW_GAP=34 name band is gone — superseded by NAME_BAND below.)
 
 // POD_H (92) is the pod's HIT-TEST box (kept for podAt / sprites.js), but the
@@ -148,7 +159,7 @@ export function initOffice(canvasEl, labelLayerEl) {
     loadCharacters(); // async; loop falls back to procedural until ready
     // User avatar — hybrid only. Created disabled; the 'g' key (or the toggle
     // button) turns it on, which also flips the camera into follow mode.
-    avatar = createAvatar({ enabled: false, start: { x: MARGIN + 30, y: WALL_H + 40 } });
+    avatar = createAvatar({ enabled: false, start: { x: MARGIN + 30, y: WALL_H + SKY + 40 } });
     setupAvatarToggle();
   }
   window.addEventListener('resize', onResize);
@@ -316,15 +327,20 @@ function clusterSizes(n) {
 }
 
 // --- Neighborhoods (hybrid) pod geometry -----------------------------------
-// A hybrid pod is a SINGLE horizontal row of `count` workers standing behind one
-// continuous counter (no 2-column grid). Per-slot width stays POD_W so the
-// monitor/keyboard/hit-box composition is unchanged; slots are edge-to-edge (the
-// counter is continuous, a leg-divider — not a gap — separates stations).
+// A hybrid repo block is a DENSE tiled grid of CUBICLES — up to TILE_COLS columns
+// wide, stacking into rows — so the floor packs like the reference. Per-cell width
+// stays POD_W (the hit-box / monitor composition is unchanged); cells abut
+// edge-to-edge (the cubicle wall divider is the seam). A thin header tab tops the
+// block (the repo label sits there instead of a translucent rug).
+const TILE_COLS = 3;      // max cubicles across per repo block
+const HEADER_H = 9;       // repo-name header band atop each block
 function clusterDimsRow(count) {
+  const ccols = Math.min(count, TILE_COLS);
+  const crows = Math.ceil(count / ccols);
   return {
-    ccols: count, crows: 1,
-    w: count * POD_W + CLUSTER_PAD * 2,
-    h: CLUSTER_PAD * 2 + POD_CONTENT_H + NAME_BAND,
+    ccols, crows,
+    w: ccols * POD_W,
+    h: HEADER_H + crows * POD_ROW_STRIDE,
   };
 }
 
@@ -364,7 +380,7 @@ function planFloor(n) {
       { kind: 'lounge', w: LOUNGE_W, h: POD_H + 6, seed: 47 },
       { kind: 'green', w: GREEN_W, h: POD_H - 8, seed: 59 },
     ];
-    let ex = MARGIN; const ey = WALL_H + MARGIN; let eh = 0;
+    let ex = MARGIN; const ey = WALL_H + SKY + MARGIN; let eh = 0;
     blocks.forEach((b) => { decorZones.push({ type: b.kind, x: ex, y: ey, w: b.w, h: b.h, seed: b.seed }); ex += b.w + ZONE_GAP_X; eh = Math.max(eh, b.h); });
     bufW = Math.round(ex - ZONE_GAP_X) + MARGIN;
     bufH = ey + eh + MARGIN;
@@ -386,7 +402,9 @@ function planFloor(n) {
     // between EVERY pod spreads the floor thin — in hybrid only sprinkle one every
     // few pods (and skip the chunky lounge in favour of slim greenery) so team
     // rugs pack closer. Default keeps a zone between every cluster.
-    const sprinkle = HYBRID ? (ci % 3 === 2) : true;
+    // Hybrid packs cubicle blocks edge-to-edge — NO social zones between them
+    // (decor moves to a dedicated scatter pass against the wall / in corridors).
+    const sprinkle = HYBRID ? false : true;
     if (ci < sizes.length - 1 && sprinkle) { // never trail a social zone past the last cluster
       // Hybrid only ever uses slim GREENERY between pods (matches the tight
       // gapAllow); default rotates greenery / lounge / collab for variety.
@@ -410,23 +428,34 @@ function planFloor(n) {
   // (a slim greenery gap, not a lounge's worth of slack) so the floor doesn't read
   // empty. Default keeps the original 2-col-cluster spacing.
   const perRow = HYBRID
-    ? (nClusters <= 1 ? 1 : nClusters <= 4 ? 2 : 3)
+    ? clamp(Math.round(Math.sqrt(nClusters)) + 1, 2, 5) // pack repo blocks into a tight grid
     : (nClusters <= 1 ? 1 : nClusters <= 2 ? 2 : nClusters <= 6 ? 3 : 4);
-  const gapAllow = HYBRID ? ZONE_GAP_X + GREEN_W : ZONE_GAP_X * 2 + LOUNGE_W;
-  const targetW = MARGIN * 2 + widest * perRow + gapAllow * Math.max(0, perRow - 1);
+  // Hybrid: a tiny 4px gutter between repo blocks (they read as one connected
+  // floor). Default keeps a lounge's worth of slack for the social zones.
+  const gapAllow = HYBRID ? 4 : ZONE_GAP_X * 2 + LOUNGE_W;
+  // Hybrid reserves side bands for the cozy zones, so the bullpen sits centred
+  // between them (the floor still grows wide enough for both zones + the grid).
+  const sideBands = HYBRID ? ZONE_L + ZONE_R : 0;
+  const bullpenX0 = MARGIN + (HYBRID ? ZONE_L : 0);
+  const targetW = MARGIN * 2 + sideBands + widest * perRow + gapAllow * Math.max(0, perRow - 1);
 
   // Greedy row-wrap: place blocks left→right until the next one would overflow
   // targetW, then start a new row below the tallest block of the previous row.
   // Alternating blocks in a row get a small vertical STAGGER so the floor breaks
   // its horizon line and reads organic rather than as aligned spreadsheet rows.
-  const STAGGER = 16;
-  let cx = MARGIN, cy = WALL_H + MARGIN, rowH = 0, rowStart = 0, rowCol = 0;
+  // Hybrid packs blocks edge-to-edge in a flat grid (no organic stagger, tiny
+  // gutters) so cubicles read as one connected floor; default stays organic.
+  const STAGGER = HYBRID ? 0 : 16;
+  const GAP_X = HYBRID ? 4 : ZONE_GAP_X;
+  const GAP_Y = HYBRID ? 6 : ZONE_GAP_Y;
+  const bullpenRight = targetW - MARGIN - (HYBRID ? ZONE_R : 0); // right wrap bound (reserve right zone)
+  let cx = bullpenX0, cy = WALL_H + SKY + MARGIN, rowH = 0, rowStart = 0, rowCol = 0;
   const placed = [];
   const finishRow = (endX) => {
-    // centre each finished row horizontally so the floor reads balanced, and
+    // centre each finished row within the bullpen band so it reads balanced, and
     // stretch its decor zones to the row height so their furniture bottom-aligns
     // with the desk clusters instead of floating up at the row's top.
-    const slack = (targetW - MARGIN - endX);
+    const slack = (bullpenRight - endX);
     const rowBottom = cy + rowH;
     for (let k = rowStart; k < placed.length; k++) {
       if (slack > 1) placed[k].x += slack / 2;
@@ -436,13 +465,13 @@ function planFloor(n) {
     }
   };
   blocks.forEach((b) => {
-    if (cx > MARGIN && cx + b.w > targetW - MARGIN) {
-      finishRow(cx - ZONE_GAP_X);
-      cx = MARGIN; cy += rowH + ZONE_GAP_Y; rowH = 0; rowStart = placed.length; rowCol = 0;
+    if (cx > bullpenX0 && cx + b.w > bullpenRight) {
+      finishRow(cx - GAP_X);
+      cx = bullpenX0; cy += rowH + GAP_Y; rowH = 0; rowStart = placed.length; rowCol = 0;
     }
     const stag = rowCol % 2 ? STAGGER : 0; // every other block nudged down
     placed.push({ ...b, x: cx, y: cy + stag });
-    cx += b.w + ZONE_GAP_X; rowCol++;
+    cx += b.w + GAP_X; rowCol++;
     rowH = Math.max(rowH, b.h + stag); // keep row tall enough for the nudged block
   });
   finishRow(cx - ZONE_GAP_X);
@@ -456,12 +485,12 @@ function planFloor(n) {
       clusters.push({ x: b.x, y: b.y, w: b.w, h: b.h, count: b.count, seed: b.seed, firstAgent: podSlots.length });
       const { ccols } = b.dims;
       for (let k = 0; k < b.count; k++) {
+        const c = k % ccols, r = Math.floor(k / ccols);
         if (HYBRID) {
-          // single horizontal row: workers stand side-by-side behind the counter,
-          // slots edge-to-edge (no COL_GAP — the counter is continuous).
-          podSlots.push({ x: b.x + CLUSTER_PAD + k * POD_W, y: b.y + CLUSTER_PAD });
+          // dense tiled grid: cubicles abut edge-to-edge (no COL_GAP), rows stack
+          // below a thin repo header.
+          podSlots.push({ x: b.x + c * POD_W, y: b.y + HEADER_H + r * POD_ROW_STRIDE });
         } else {
-          const c = k % ccols, r = Math.floor(k / ccols);
           podSlots.push({
             x: b.x + CLUSTER_PAD + c * (POD_W + COL_GAP),
             y: b.y + CLUSTER_PAD + r * POD_ROW_STRIDE,
@@ -474,8 +503,12 @@ function planFloor(n) {
   });
 
   // Buffer bounds: encompass every pod + decor block, plus a margin.
-  let maxX = MARGIN, maxY = WALL_H + MARGIN;
+  let maxX = MARGIN, maxY = WALL_H + SKY + MARGIN;
   placed.forEach((b) => { maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h); });
+  // Hybrid: the static cozy ZONES (lounge/kitchen/meeting + planter row) extend
+  // below the cubicles, so the buffer must reach the zone floor — otherwise they'd
+  // be clipped, and the camera would frame a half-empty floor. Hug it tightly.
+  if (HYBRID) maxY = Math.max(maxY, WALL_H + SKY + COZY_ZONE_H);
   bufW = Math.max(targetW, Math.round(maxX) + MARGIN);
   bufH = Math.round(maxY) + MARGIN;
 }
@@ -495,7 +528,7 @@ function layout() {
 }
 
 function podOrigin(i) {
-  return podSlots[i] || { x: MARGIN, y: WALL_H + MARGIN };
+  return podSlots[i] || { x: MARGIN, y: WALL_H + SKY + MARGIN };
 }
 
 function totalSlots() { return podSlots.length; }
@@ -506,7 +539,12 @@ function computeFit() {
   if (!viewport || !bufW || !bufH) return cam;
   const availW = Math.max(40, viewport.clientWidth - reservedRight);
   const availH = Math.max(40, viewport.clientHeight);
-  const s = Math.min((availW - FIT_PAD * 2) / bufW, (availH - FIT_PAD * 2) / bufH);
+  let s = Math.min((availW - FIT_PAD * 2) / bufW, (availH - FIT_PAD * 2) / bufH);
+  // Hybrid de-spacey: bias toward a CLOSER zoom so cubicles read big and the
+  // floor feels full/immersive. Push the fit up to HYBRID_FIT× the natural fit
+  // (never below it); allow a little horizontal overflow (panned) so a small
+  // office really zooms in, capped so a big office still mostly frames.
+  if (HYBRID) s = clamp(s * HYBRID_FIT, s, 1.35 * availW / bufW);
   fitScale = clamp(s, 0.05, 6);
   return {
     s: fitScale,
@@ -994,9 +1032,10 @@ function drawFloor() {
 function drawRoom() {
   if (!sheetReady()) { drawFloor(); drawWall(); return; }
 
-  // Neighborhoods (hybrid): the real blue SHEET floor tile + translucent team
-  // rugs under each pod. Default keeps the procedural warm-wood floor + teal rugs.
-  if (HYBRID) { drawBlueFloor(); drawTeamRugs(); }
+  // Cozy office (hybrid): SKY + clouds, the warm plank floor, then the static
+  // cozy ZONES (lounge / kitchen / meeting) framing the central bullpen. Default
+  // keeps the procedural warm-wood floor + teal rugs.
+  if (HYBRID) { drawSky(); drawBlueFloor(); drawCozyZones(); }
   else { drawWoodFloor(); drawClusterRugs(); }
   drawDaylight();
   drawBackWall();
@@ -1004,36 +1043,46 @@ function drawRoom() {
   drawDecorZones();
 }
 
-// --- floor: the real blue brick SHEET tile (Neighborhoods / hybrid) ----------
-// Tiles floorBlue [73×24] across the whole floor area, offsetting alternate rows
-// by half a tile so the brick joints stagger instead of lining up into columns.
-function drawBlueFloor() {
-  const tw = sprW('floorBlue'), th = sprH('floorBlue');
-  for (let y = WALL_H, row = 0; y < bufH; y += th, row++) {
-    const off = row % 2 ? -Math.floor(tw / 2) : 0; // stagger alternate rows
-    for (let x = off; x < bufW; x += tw) blit(ctx, 'floorBlue', x, y);
+// Sky band above the wall (hybrid): a flat blue fill, the sheet `sky` strip, and
+// a few static clouds scattered across the width — like the reference's opening.
+const CLOUD_SPRITES = ['cloudBigA', 'cloudSmA', 'cloudSmB', 'cloudBigB', 'cloudSmC'];
+function drawSky() {
+  if (!sheetReady()) return;
+  ctx.fillStyle = '#5aa9e6';
+  ctx.fillRect(0, 0, bufW, SKY_H);
+  for (let x = 0; x < bufW; x += sprW('sky')) blit(ctx, 'sky', x, 0); // textured sky strip
+  // scatter the 5 clouds, repeating the set every ~300px so a wide floor stays populated
+  const band = 300;
+  for (let bx = 0; bx < bufW; bx += band) {
+    CLOUD_SPRITES.forEach((cl, k) => {
+      const cw = sprW(cl);
+      const x = bx + (hashInt('cloud' + bx + cl) % Math.max(1, band - cw));
+      const y = 1 + (k % 2) * 11;
+      if (x + cw < bufW) blit(ctx, cl, x, y);
+    });
   }
 }
 
-// Team rug: a translucent lighter-blue rectangle with a white border that GROUPS
-// each pod's desks into a neighbourhood, sitting on the floor in front of (below)
-// the counter. Co-located agents share a pod (grouped by project), so the rug
-// reads as "this team's area". Mirrors the layout_c mockup.
-function drawTeamRugs() {
-  clusters.forEach((c) => {
-    // the rug wraps the WHOLE pod — the counter band + the floor in front — so the
-    // white border frames "this team's area" (the counter is drawn on top later).
-    const rx = c.x + 3;
-    const ry = c.y + CLUSTER_PAD + COUNTER_TOP - 6; // a few px above the counter top
-    const rw = c.w - 6;
-    const rh = c.y + c.h - ry - 3;
-    ctx.fillStyle = 'rgba(180,225,255,0.16)'; // translucent light-blue wash
-    ctx.fillRect(rx, ry, rw, rh);
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'; // crisp white border
-    ctx.fillRect(rx, ry, rw, 1); ctx.fillRect(rx, ry + rh - 1, rw, 1);
-    ctx.fillRect(rx, ry, 1, rh); ctx.fillRect(rx + rw - 1, ry, 1, rh);
-  });
+// --- floor: warm muted-steel PLANK (cozy-zoned target palette) ---------------
+// A calm steel-blue plank floor (per the approved cozy mockup): a flat base, a
+// hilite + mortar seam line per 12px plank row, and staggered vertical plank
+// joints. Replaces the brighter brick tile.
+const FLOOR_BASE = '#4a8ac4';   // rgb(74,138,196)
+const FLOOR_MORTAR = '#345c8c'; // rgb(52,92,140)
+const FLOOR_HILITE = '#78b0dc'; // rgb(120,176,220)
+function drawBlueFloor() {
+  const top = WALL_H + SKY;
+  ctx.fillStyle = FLOOR_BASE;
+  ctx.fillRect(0, top, bufW, bufH - top);
+  const plank = 12;
+  for (let y = top, row = 0; y < bufH; y += plank, row++) {
+    ctx.fillStyle = FLOOR_HILITE; ctx.fillRect(0, y, bufW, 1);       // plank-row hilite
+    ctx.fillStyle = FLOOR_MORTAR; ctx.fillRect(0, y + 1, bufW, 1);   // seam below it
+    ctx.fillStyle = FLOOR_MORTAR; // staggered vertical plank joints
+    for (let x = (row % 2 ? 40 : 0); x < bufW; x += 80) ctx.fillRect(x, y + 2, 1, plank - 3);
+  }
 }
+
 
 // --- floor: warm wood planks (modern / WeWork vibe) ---
 function drawWoodFloor() {
@@ -1077,17 +1126,21 @@ function drawClusterRugs() {
 
 // Soft daylight from the windows: warm wash up top fading to a far-corner shadow.
 function drawDaylight() {
-  const light = ctx.createLinearGradient(0, WALL_H, 0, bufH);
+  const light = ctx.createLinearGradient(0, WALL_H + SKY, 0, bufH);
   light.addColorStop(0, 'rgba(255,240,208,0.18)');
   light.addColorStop(0.45, 'rgba(255,240,208,0.04)');
   light.addColorStop(1, 'rgba(35,18,4,0.12)');
   ctx.fillStyle = light;
-  ctx.fillRect(0, WALL_H, bufW, bufH - WALL_H);
+  ctx.fillRect(0, WALL_H + SKY, bufW, bufH - WALL_H - SKY);
 }
 
 // --- back wall: warm off-white, a concrete feature panel with framed art, a
 // run of floor-to-ceiling windows, plus the kitchenette + printer amenities. ---
 function drawBackWall() {
+  // Shift the whole wall down by SKY (the sky band sits above it in hybrid; SKY=0
+  // in default so this is a no-op there). All y-anchors below stay wall-relative.
+  ctx.save();
+  ctx.translate(0, SKY);
   ctx.fillStyle = '#ece3d2';
   ctx.fillRect(0, 0, bufW, WALL_H);
   ctx.fillStyle = 'rgba(120,90,50,0.05)'; // faint paneling lines
@@ -1149,6 +1202,7 @@ function drawBackWall() {
   if (bufW > 200) { x += blitStanding(ctx, 'coffeeMachine', x, base) + 4; blitStanding(ctx, 'treePlant', x, base); }
   blitStanding(ctx, 'monitorA', bufW - 22, base);
   blitStanding(ctx, 'treePlant', bufW - 42, base);
+  ctx.restore(); // end SKY translate
 }
 
 // Exposed industrial ceiling: a red service pipe runs across the top of the
@@ -1157,7 +1211,7 @@ function drawBackWall() {
 // (the signature WeWork ceiling).
 function drawCeiling() {
   // red service pipe just below the wall, with a parallel thinner conduit
-  const py = WALL_H + 4;
+  const py = WALL_H + SKY + 4;
   ctx.fillStyle = '#c0473a';
   ctx.fillRect(0, py, bufW, 3);
   ctx.fillStyle = 'rgba(255,255,255,0.10)';
@@ -1325,13 +1379,12 @@ function drawDeskProps(px0, py0, i) {
 // The static sheet workers are SHORTER standing poses (~21-24px) than the
 // generated 34px atlas; a touch-lower baseline keeps their feet near the chair
 // so they don't appear to float above the desk.
-const SEAT_DX = 22; // = worker centre-x (cx)
-const SEAT_BASELINE_ANIM = 58; // generated atlas: seat line just below the desk front edge
-// Neighborhoods: the static worker STANDS behind the counter. Its feet land on
-// the floor low in the pod; the counter (drawn on top) hides everything below
-// COUNTER_TOP, leaving head + shoulders visible above the counter. Baseline set
-// so ~13px of worker (head+shoulders) clears the counter top.
-const STAND_BASELINE_STATIC = 60; // feet at py0+60 → head ~py0+37, clears COUNTER_TOP(50)
+// The worker sits in the booth's LEFT half, on the chair (drawn by drawCubicleCell
+// behind it). Centred at CHAIR_DX, feet on the booth floor; the desk + gear (right
+// half) is drawn beside them by drawCubicleDeskTop.
+// SEAT_DX / SEAT_BASELINE_* are defined below, after the booth-geometry consts
+// (CHAIR_DX, BOOTH_FLOOR) they depend on — declaring them here would TDZ-crash
+// module load. They're only read inside drawSeatedCharacter (call time), so order is fine.
 function drawSeatedCharacter(px0, py0, char, a, i, clockMs) {
   const state = charStateFor(a);
   // per-agent phase so a row of typists doesn't keystroke in lockstep
@@ -1341,11 +1394,10 @@ function drawSeatedCharacter(px0, py0, char, a, i, clockMs) {
 }
 
 // Head-anchored badges (PM crown, selection plumbob, "needs you" bubble) are
-// positioned relative to the head top. The standing worker's head sits ~py0+37,
-// so we drop the badge anchor by HYBRID_HEAD_DROP to hug it rather than float in
-// the gap above. (drawLeadBadge/drawPlumbob/drawNeedsYou draw at anchorY-8, so
-// at +43 the crown bottom lands ~2px above the head — snug, not floating.)
-const HYBRID_HEAD_DROP = 43;
+// positioned relative to the head top. The seated booth worker's head sits
+// ~py0+35, so we drop the badge anchor by HYBRID_HEAD_DROP to hug it (the badge
+// funcs draw at anchorY-8, so +40 lands the crown just above the head).
+const HYBRID_HEAD_DROP = 40;
 function badgeAnchorY(py0, hasChar) {
   return hasChar ? py0 + HYBRID_HEAD_DROP : py0;
 }
@@ -1381,86 +1433,78 @@ function screenLit(a) {
   return a.activity === 'working' || a.activity === 'shell';
 }
 
-// --- Neighborhoods counter desk (hybrid) -------------------------------------
-// One continuous grey COUNTER spans each pod; workers STAND behind it, the
-// counter front hides their legs. Built from the sheet counterGray top, tan leg
-// dividers between stations, a dark front edge, and a printer at the left end.
-const COUNTER_TOP = 50;   // py0 + this = counter top edge (matches the old deskTop)
-const COUNTER_FRONT_H = 4; // dark front-edge band height (hides standing legs)
-const LEG_COLOR = '#d6b46a';   // tan/yellow station leg-divider
-const LEG_SHADE = '#a8884a';
-const COUNTER_EDGE = '#3a4250'; // dark front edge
+// --- Cozy CUBICLE booth (hybrid) — SIDE-BY-SIDE layout -----------------------
+// Each worker sits in a furnished BOOTH matching the approved mockup: a grey
+// booth (back wall + shared side dividers) with a flag pinned over the worker and
+// a framed picture over the desk; INSIDE, laid out HORIZONTALLY — a seated worker
+// in a chair on the LEFT, and a tan desk with the tier-tinted monitorA + books +
+// a small printer on the RIGHT, BESIDE the worker (not stacked in front of them).
+const BOOTH_TOP = 8;       // booth back-wall top, relative to the cell top (py0)
+const BOOTH_H = 50;        // booth interior height
+const BOOTH_FLOOR = BOOTH_TOP + BOOTH_H; // py0 + this = booth floor (worker/chair feet)
+const BOOTH = '#96aaba';      // booth wall grey
+const BOOTH_HI = '#cedae4';   // top rail
+const BOOTH_SIDE = '#788c9c';  // shared side dividers
+const DESK_TAN = '#e7b86a';    // tan desk surface
+const DESK_TAN_HI = '#ffe0a8'; // desk highlight
+const DESK_TAN_LO = '#ce9e5a'; // desk front edge
+const CHAIR_DX = 16;          // worker/chair centre-x within the booth (LEFT half)
+const DESK_X = 30;            // desk left edge within the booth (RIGHT half)
+const CX_OFF = CHAIR_DX;      // worker centre-x (left half) — used by the worker draw
+const SEAT_DX = CHAIR_DX;        // worker centre-x = the chair (left half)
+const SEAT_BASELINE_ANIM = BOOTH_FLOOR - 1;   // generated 34px atlas: sit on the chair
+const STAND_BASELINE_STATIC = BOOTH_FLOOR - 1; // static sheet worker: feet on the booth floor
 
-// Shared counter geometry for a cluster: top-y, left-x, and a clean span. A
-// single-station pod would otherwise span only POD_W(64) — shorter than the
-// counterGray sprite (79) — and read as a stub; so a 1-wide counter gets a
-// proper-desk minimum width, centred under its worker (still inside the pod's
-// CLUSTER_PAD gutter, so it never collides with neighbours).
-const COUNTER_MIN_W = 76; // a lone desk reads full, not stubby
-function counterRect(c) {
-  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2; // aligns to per-slot deskTop
-  const slotsW = c.count * POD_W;
-  const span = Math.max(slotsW, COUNTER_MIN_W);
-  // centre the span over the worker slots (only widens a single pod into its pad)
-  const x0 = c.x + CLUSTER_PAD - Math.round((span - slotsW) / 2);
-  return { top, x0, span, ch: sprH('counterGray') };
-}
-
-// Counter SLAB + leg dividers for a whole cluster, drawn BEFORE the workers so
-// they stand behind it. (The dark front edge is a separate pass — drawCounterFront
-// — drawn AFTER the workers to occlude their legs.)
-function drawSheetCounter(c) {
+// Booth back wall + shared side dividers + pinned flag/picture + the seated
+// worker's CHAIR. Drawn BEFORE the worker body (chair behind worker). The desk +
+// gear (right half) is drawn after the worker by drawCubicleDeskTop.
+const BOOTH_PINS = ['flagUS', 'flagUK', 'flagIN', 'picture', 'calendar'];
+function drawCubicleCell(px0, py0, a, i) {
   if (!sheetReady()) return;
-  const { top, x0, span, ch } = counterRect(c);
-  // grey counter top: tiled counterGray clipped to the span (79>64 so per-slot
-  // blits overlap into a seamless continuous grey; one extra blit covers a
-  // widened single-pod span).
-  ctx.save();
-  ctx.beginPath(); ctx.rect(x0, top, span, ch + COUNTER_FRONT_H + 2); ctx.clip();
-  for (let bx = x0; bx < x0 + span; bx += POD_W) blit(ctx, 'counterGray', bx, top);
-  ctx.restore();
-  // tan leg dividers: station boundaries + the two end caps.
-  const ndiv = Math.max(c.count, 1);
-  for (let k = 0; k <= ndiv; k++) {
-    const lx = k === ndiv ? x0 + span - 2 : x0 + Math.round((k / ndiv) * span);
-    ctx.fillStyle = LEG_COLOR; ctx.fillRect(lx, top + 2, 2, ch + COUNTER_FRONT_H - 2);
-    ctx.fillStyle = LEG_SHADE; ctx.fillRect(lx + 1, top + 2, 1, ch + COUNTER_FRONT_H - 2);
+  const top = py0 + BOOTH_TOP, floorY = py0 + BOOTH_FLOOR;
+  // booth back wall (grey) with a light top rail + shared tall side dividers
+  ctx.fillStyle = BOOTH; ctx.fillRect(px0, top, POD_W, BOOTH_H);
+  ctx.fillStyle = BOOTH_HI; ctx.fillRect(px0, top, POD_W, 2);
+  ctx.fillStyle = BOOTH_SIDE; ctx.fillRect(px0, top, 2, BOOTH_H + 4);
+  ctx.fillStyle = BOOTH_SIDE; ctx.fillRect(px0 + POD_W - 2, top, 2, BOOTH_H + 4);
+  if (a) {
+    const seed = seedOf(a, i);
+    // pinned: a flag/picture/calendar over the worker (left), a framed picture
+    // over the desk (right) — varied by seed so booths read individually.
+    blit(ctx, BOOTH_PINS[seed % BOOTH_PINS.length], px0 + 7, top + 5);
+    blit(ctx, 'picture', px0 + 36, top + 5);
+    // the worker's office chair (drawn here, behind the worker body)
+    const chairCx = px0 + CHAIR_DX;
+    blitStanding(ctx, 'chairGray', chairCx - Math.round(sprW('chairGray') / 2), floorY + 3);
   }
 }
 
-// The dark counter front edge, drawn AFTER the workers so the edge occludes their
-// lower legs (selling "standing behind the counter"). (No left-end printer — the
-// pack has no printer sprite; what the atlas called "printer" is the real monitor.)
-function drawCounterFront(c) {
+// The RIGHT-half DESK (tan surface) with the tier-tinted monitorA + colored books
+// + a small printer — drawn AFTER the worker so the desk + gear sit BESIDE the
+// seated worker (the desk front also occludes the worker's lower legs). Mirrors
+// the cozylib cubicle() right half.
+function drawCubicleDeskTop(px0, py0, a, i) {
   if (!sheetReady()) return;
-  const { top, x0, span, ch } = counterRect(c);
-  ctx.fillStyle = COUNTER_EDGE;
-  ctx.fillRect(x0, top + ch, span, COUNTER_FRONT_H);
-}
-
-// The real monitor (monitorA = monitor+keyboard combo, side-view) sits ON the
-// counter in front of each worker, drawn AFTER the worker so it reads as nearer.
-// Its base rests on the counter surface; the worker's head + shoulders stay
-// visible above it — "someone at their workstation". The combo already includes
-// a keyboard, so no separate keyboard is drawn.
-const CX_OFF = 22; // worker centre-x within the pod (= SEAT_DX)
-function drawSheetDeskTop(px0, py0, a) {
-  if (!sheetReady()) return;
-  const counterTop = py0 + COUNTER_TOP; // top edge of the counter band
-  const cx = px0 + CX_OFF;
-  const mw = sprW('monitorA'), mh = sprH('monitorA');
-  // centred on the worker's station, base sitting on the counter surface; set a
-  // touch lower than the worker's face so head+shoulders stay clearly above it.
-  const mx = cx - Math.round(mw / 2);
-  const my = counterTop + 16 - mh; // base ~16px into the counter band (on the surface)
+  const floorY = py0 + BOOTH_FLOOR;
+  const deskX = px0 + DESK_X;
+  const deskR = px0 + POD_W - 2;
+  const deskTop = floorY - 16;
+  // tan desk surface (right half)
+  ctx.fillStyle = DESK_TAN; ctx.fillRect(deskX, deskTop, deskR - deskX, floorY - deskTop);
+  ctx.fillStyle = DESK_TAN_HI; ctx.fillRect(deskX, deskTop, deskR - deskX, 1);
+  ctx.fillStyle = DESK_TAN_LO; ctx.fillRect(deskX, floorY - 2, deskR - deskX, 2);
+  // monitorA unit (tier-tinted screen) sits on the desk
+  const mx = deskX + 1, my = deskTop - 13;
   blitMonitor(ctx, mx, my, 1, screenTint(a));
-  // tiny "power on" highlight on the screen when lit (working/shell), so active
-  // reads at floor zoom even when the dim/bright delta is subtle.
   if (screenLit(a)) {
     const s = MONITOR_SCREEN;
     ctx.fillStyle = mix(colorFor(a.model).screen, 0.55);
     ctx.fillRect(mx + s.x, my + s.y, 2, 2);
   }
+  // colored books + a small printer beside the monitor
+  const books = ['booksRed', 'booksBlue', 'booksGreen'];
+  blit(ctx, books[(a ? seedOf(a, i) : i) % 3], deskX + 16, deskTop + 4);
+  blit(ctx, 'printer', deskR - 11, deskTop + 3);
 }
 
 // One agent's pod in the DEFAULT (non-hybrid) renderer — the original procedural
@@ -1480,19 +1524,20 @@ function drawProceduralPod(i) {
   if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, o.y, frame);
 }
 
-// The HYBRID "Neighborhoods" floor, drawn in z-order PASSES so a row of workers
-// reads as standing behind one shared counter:
-//   1. worker BODIES (bodyless workstation: just the sprite character + LED + minions)
-//   2. the COUNTER per cluster (top + leg dividers) — covers each worker's lower body
-//   3. the counter FRONT edge + left printer (occludes legs) + per-worker monitor/keyboard
-//   4. head badges (crown / needs-you) hugging the standing heads
+// The HYBRID "Neighborhoods" floor — dense furnished CUBICLES, drawn in z-order
+// passes so each worker reads as sitting in their own booth:
+//   1. cubicle CELL (back-wall panel + pinned decor + tan desk surface) — behind worker
+//   2. worker BODIES (bodyless: sprite character + LED + minions)
+//   3. desk-FRONT strip (occludes legs) + desk TOP (monitor + printer)
+//   4. head badges (crown / needs-you)
+//   5. floor decor (pets / trash / corridor plants)
 function drawHybridFloor(slots) {
-  // pass 1: worker bodies
+  // pass 1: cubicle cells (booth backdrop + desk surface)
+  for (let i = 0; i < slots; i++) drawCubicleCell(podOrigin(i).x, podOrigin(i).y, agents[i], i);
+  // pass 2: worker bodies
   for (let i = 0; i < slots; i++) {
     const o = podOrigin(i);
     const a = agents[i];
-    // vacant slot: skip the procedural desk/chair (the counter pass covers this
-    // station); just leave the spot empty behind the counter.
     if (!a) { drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99, noChair: true, noDeskMonitor: true }); continue; }
     const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
     const char = characterFor(a, i);
@@ -1504,24 +1549,97 @@ function drawHybridFloor(slots) {
     });
     if (char) drawSeatedCharacter(o.x, o.y, char, a, i, frame * 130);
   }
-  // pass 2: the counter slab + leg dividers (behind the front edge, over the legs)
-  clusters.forEach((c) => drawSheetCounter(c));
-  // pass 3: counter front edge + printer, then per-worker monitor + keyboard
-  clusters.forEach((c) => drawCounterFront(c));
-  for (let i = 0; i < slots; i++) {
-    const a = agents[i];
-    if (!a) continue;
-    const o = podOrigin(i);
-    drawSheetDeskTop(o.x, o.y, a);
-  }
-  // pass 4: head badges
+  // pass 3: the right-half desk + monitor/books/printer, BESIDE the worker
+  for (let i = 0; i < slots; i++) { if (agents[i]) drawCubicleDeskTop(podOrigin(i).x, podOrigin(i).y, agents[i], i); }
+  // pass 4: head badges — over the seated worker (booth LEFT half)
   for (let i = 0; i < slots; i++) {
     const a = agents[i];
     if (!a) continue;
     const o = podOrigin(i);
     const badgeY = badgeAnchorY(o.y, !!characterFor(a, i));
-    if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, badgeY, frame);
-    if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, badgeY, frame);
+    if (a.role === 'lead') drawLeadBadge(ctx, o.x + CHAIR_DX, badgeY, frame);
+    if (a.awaitingReply) drawNeedsYou(ctx, o.x + CHAIR_DX, badgeY, frame);
+  }
+  // pass 5: lived-in floor decor (in front of desks, behind selection UI)
+  drawFloorDecor();
+}
+
+// A little extra lived-in detail among the cubicle blocks: a trash bin tucked at
+// the right edge of some blocks (the lounge / kitchen / meeting zones + the
+// bottom planter row, drawn by drawCozyZones, carry the rest of the decor).
+function drawFloorDecor() {
+  if (!sheetReady() || !clusters.length) return;
+  const bins = ['trashGreen', 'trashRed', 'trashBlue'];
+  clusters.forEach((c, ci) => {
+    if (ci % 3 !== 1) return;
+    blitStanding(ctx, bins[ci % bins.length], c.x + c.w + 1, c.y + c.h - 2);
+  });
+}
+
+// --- cozy zones (hybrid): static decor framing the central bullpen ----------
+// LEFT: a branding panel + a lounge (couch / chairs / table / plant / corgi) on a
+// rug. RIGHT: a kitchen-break nook (coffee / cups / vending / water-fountain) + a
+// meeting corner (long table / green chairs / plant / cat) on a rug. BOTTOM: a
+// full planter row of trees. Mirrors the approved cozy mockup (cozylib layout).
+function drawSoftRug(x, y, w, h, fill) {
+  ctx.fillStyle = fill; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(x, y, w, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(x, y + h - 1, w, 1);
+}
+function drawBrandingSign(x, y, w, h) {
+  ctx.fillStyle = '#264a40'; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#609684'; ctx.fillRect(x, y, w, 1);
+  ctx.fillStyle = '#142c26'; ctx.fillRect(x, y + h - 2, w, 2);
+  // a tiny mountain glyph
+  ctx.fillStyle = '#e6f0ec';
+  ctx.beginPath(); ctx.moveTo(x + 4, y + 11); ctx.lineTo(x + 8, y + 5); ctx.lineTo(x + 12, y + 11); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#cfe0d8';
+  ctx.beginPath(); ctx.moveTo(x + 10, y + 11); ctx.lineTo(x + 13, y + 7); ctx.lineTo(x + 16, y + 11); ctx.closePath(); ctx.fill();
+  // "STUDIO" stripe
+  ctx.fillStyle = '#dff0e8'; ctx.fillRect(x + 3, y + h - 6, w - 6, 3);
+}
+function drawCozyZones() {
+  if (!sheetReady()) return;
+  const ft = WALL_H + SKY;            // floor top
+  const lx = MARGIN;                  // left zone x
+  const rx = bufW - MARGIN - ZONE_R;  // right zone x
+
+  // ---- LEFT: branding + lounge ----
+  drawSoftRug(lx, ft + 40, ZONE_L - 4, 60, 'rgba(235,214,176,0.22)');
+  drawBrandingSign(lx + 6, ft + 4, 60, 22);
+  blit(ctx, 'picture', lx + 74, ft + 8);
+  blitStanding(ctx, 'treePlant', lx + 86, ft + 30);
+  blitStanding(ctx, 'couchOrange', lx + 4, ft + 70);
+  blitStanding(ctx, 'treePlant', lx + 40, ft + 72);
+  blitStanding(ctx, 'table', lx + 50, ft + 98);
+  blit(ctx, 'cup', lx + 60, ft + 84);
+  blitStanding(ctx, 'chairGray', lx + 40, ft + 100);
+  blitStanding(ctx, 'chairOrange', lx + 80, ft + 100);
+  blitStanding(ctx, 'corgi', lx + 12, ft + 100);
+
+  // ---- RIGHT: kitchen/break + meeting ----
+  drawSoftRug(rx, ft + 60, ZONE_R - 4, 54, 'rgba(200,224,210,0.22)');
+  // kitchen counter strip
+  ctx.fillStyle = '#b7c0cc'; ctx.fillRect(rx + 6, ft + 22, 70, 12);
+  ctx.fillStyle = '#cdd6e0'; ctx.fillRect(rx + 6, ft + 22, 70, 1);
+  blit(ctx, 'coffeeMachine', rx + 12, ft + 12);
+  blit(ctx, 'cup', rx + 26, ft + 16);
+  blit(ctx, 'cup', rx + 38, ft + 17);
+  blit(ctx, 'printer', rx + 52, ft + 14);
+  blitStanding(ctx, 'vendDrink', rx + 78, ft + 34);
+  blitStanding(ctx, 'vendSnack', rx + 100, ft + 34);
+  blitStanding(ctx, 'waterFountain', rx + 64, ft + 58);
+  // meeting corner
+  blitStanding(ctx, 'tableLong', rx + 12, ft + 104);
+  blitStanding(ctx, 'chairGreen', rx + 14, ft + 112);
+  blitStanding(ctx, 'chairGreen', rx + 48, ft + 112);
+  blitStanding(ctx, 'treePlant', rx + 80, ft + 102);
+  blitStanding(ctx, 'cat', rx + 96, ft + 110);
+  blitStanding(ctx, 'treePlant', rx + ZONE_R - 16, ft + 36);
+
+  // ---- BOTTOM: planter row of trees across the floor ----
+  for (let x = MARGIN + 4; x < bufW - MARGIN - 10; x += 24) {
+    blitStanding(ctx, 'treePlant', x, bufH - 4);
   }
 }
 
@@ -1538,7 +1656,7 @@ function loop(t) {
       avatarLastT = t;
       const podPositions = [];
       for (let i = 0; i < slots; i++) { if (agents[i]) { const o = podOrigin(i); podPositions.push({ x: o.x, y: o.y, i, agent: agents[i] }); } }
-      avatar.update(dt, { podPositions, bounds: { minX: MARGIN, maxX: bufW - MARGIN, minY: WALL_H + MARGIN, maxY: bufH - MARGIN } });
+      avatar.update(dt, { podPositions, bounds: { minX: MARGIN, maxX: bufW - MARGIN, minY: WALL_H + SKY + MARGIN, maxY: bufH - MARGIN } });
       if (avatar.enabled) centerOnAvatar();
     }
 
@@ -1563,7 +1681,7 @@ function loop(t) {
       // painting the selection plumbob over it (the ring still marks selection).
       if (agents[selIdx].role !== 'lead') {
         const selChar = HYBRID ? characterFor(agents[selIdx], selIdx) : null;
-        drawPlumbob(ctx, o.x + 22, badgeAnchorY(o.y, !!selChar), frame);
+        drawPlumbob(ctx, o.x + (HYBRID ? CHAIR_DX : 22), badgeAnchorY(o.y, !!selChar), frame);
       }
     }
   }
