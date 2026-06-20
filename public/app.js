@@ -91,7 +91,14 @@ function onState() {
   // Bail if the server returned an error body instead of state.
   if (!STATE || !STATE.live || !Array.isArray(STATE.live.agents) || !STATE.usage) return;
   const { live, usage } = STATE;
-  setAgents(live.agents);
+  // Drive the canvas office, but never let a renderer throw take down the data
+  // panels — they read the same STATE independently. (Fail-soft charter: a
+  // broken render path shouldn't blank the whole dashboard.)
+  try {
+    setAgents(live.agents);
+  } catch (e) {
+    console.error('office render failed:', e);
+  }
 
   const workingCount = live.agents.filter((a) => a.activity === 'working').length;
   $('tsLive').textContent = live.agents.length;
@@ -320,27 +327,87 @@ function shortModel(m) {
 }
 
 // ---- departments ----------------------------------------------------------
+// The user's main data complaint was that this panel listed every workspace
+// they'd ever opened (derived from all-time transcript history), drowning the
+// few they're actually working in now. We scope it to CURRENTLY-ACTIVE
+// workspaces: a project counts if it shipped output within the recency window
+// (usage.recentWindowDays, default 7) OR has a live agent on the floor right
+// now. Bars are sized by recent output so the busiest *current* work reads
+// loudest. Fail soft: if nothing is recent we fall back to all-time so the
+// panel never goes mysteriously empty.
 
 function renderDepts(usage) {
-  const entries = Object.entries(usage.byProject || {})
-    .map(([p, v]) => ({ project: p, ...v }))
-    .filter((e) => e.out > 0)
-    .sort((a, b) => b.out - a.out)
-    .slice(0, 7);
-  const max = entries.length ? entries[0].out : 1;
+  const liveProjects = new Set(
+    (STATE && STATE.live && STATE.live.agents ? STATE.live.agents : [])
+      .map((a) => a && a.project)
+      .filter(Boolean)
+  );
+
+  const all = Object.entries(usage.byProject || {})
+    .map(([p, v]) => ({ project: p, ...v, recentOut: v.recentOut || 0 }));
+
+  // Active = recent output, or a live agent sitting in that project right now.
+  let entries = all.filter((e) => e.recentOut > 0 || liveProjects.has(e.project));
+  let metric = 'recentOut';
+  let fallback = false;
+  if (!entries.length) {
+    // Nothing recent (e.g. a fresh boot before today's work) — show all-time so
+    // the panel still says something useful rather than going blank.
+    entries = all.filter((e) => e.out > 0);
+    metric = 'out';
+    fallback = true;
+  }
+
+  entries.sort((a, b) => b[metric] - a[metric]);
+  const total = entries.length;
+  entries = entries.slice(0, 7);
+  const max = entries.length ? entries[0][metric] || 1 : 1;
+
+  const win = usage.recentWindowDays || 7;
+  const hintEl = $('deptHint');
+  if (hintEl) {
+    hintEl.textContent = fallback
+      ? 'all-time (nothing active yet)'
+      : `active · last ${win}d`;
+  }
 
   const list = $('deptList');
   list.innerHTML = '';
+  if (!entries.length) {
+    list.innerHTML = '<div class="dept-empty">No active workspaces yet.</div>';
+    return;
+  }
   entries.forEach((e) => {
+    const live = liveProjects.has(e.project);
+    const liveTag = live ? '<span class="dept-live" title="an agent is here now">●</span>' : '';
+    // Sort/scale by the chosen metric, but never show a bare "0" for a project
+    // that's only here because an agent is sitting in it right now (recentOut 0
+    // but live) — fall back to its all-time output, marked so it doesn't read as
+    // "shipped this week".
+    let val = e[metric];
+    let valNote = '';
+    if (metric === 'recentOut' && val === 0 && live) {
+      val = e.out;
+      valNote = '<span class="dept-alltime" title="no output yet this week — showing all-time"> all-time</span>';
+    }
+    const barW = max ? (100 * (metric === 'recentOut' ? e.recentOut : val)) / max : 0;
     const row = document.createElement('div');
     row.className = 'dept-row';
     row.innerHTML = `
-      <div class="dept-head"><span class="dept-name">${escapeHtml(e.project)}</span>
-        <span class="dept-val">${fmt(e.out)}</span></div>
-      <div class="dept-bar"><div class="dept-fill" style="width:${(100 * e.out) / max}%"></div></div>
+      <div class="dept-head"><span class="dept-name">${liveTag}${escapeHtml(e.project)}</span>
+        <span class="dept-val">${fmt(val)}${valNote}</span></div>
+      <div class="dept-bar"><div class="dept-fill" style="width:${barW}%"></div></div>
       <div class="dept-meta">${e.sessions} sessions · ${fmt(e.tools)} actions · ${e.agents} subagents</div>`;
     list.appendChild(row);
   });
+
+  // If we trimmed the list, note how many active workspaces exist in total.
+  if (total > entries.length) {
+    const more = document.createElement('div');
+    more.className = 'dept-more';
+    more.textContent = `+${total - entries.length} more active`;
+    list.appendChild(more);
+  }
 }
 
 // ---- daily chart ----------------------------------------------------------
@@ -433,10 +500,18 @@ function renderTicker() {
       items.push(`💤 <b>${name}</b>${src} idle in ${proj}${label ? ` — ${label}` : ''}${sub} · up ${up}`);
     }
   }
-  const top = Object.entries(usage.byProject || {}).sort((a, b) => b[1].out - a[1].out)[0];
+  // Busiest department: prefer the busiest *currently-active* workspace (by
+  // recent output) so the ticker celebrates what's live, not a long-dead repo;
+  // fall back to all-time if nothing is recent.
+  const projEntries = Object.entries(usage.byProject || {});
+  const topRecent = projEntries
+    .filter(([, v]) => (v.recentOut || 0) > 0)
+    .sort((a, b) => (b[1].recentOut || 0) - (a[1].recentOut || 0))[0];
+  const top = topRecent || projEntries.sort((a, b) => b[1].out - a[1].out)[0];
+  const topVal = topRecent ? top[1].recentOut : top && top[1].out;
   items.push(`📊 ${fmt(usage.lifetime.out)} output tokens shipped all-time`);
   items.push(`🤖 ${comma(usage.lifetime.agents)} subagents dispatched across ${comma(usage.lifetime.sessions)} sessions`);
-  if (top) items.push(`🏆 busiest department: <b>${escapeHtml(top[0])}</b> (${fmt(top[1].out)})`);
+  if (top) items.push(`🏆 busiest department: <b>${escapeHtml(top[0])}</b> (${fmt(topVal)})`);
   items.push(`📅 ${usage.activeDays} days on the job since ${usage.firstDay || '—'}`);
 
   const track = $('tickerTrack');

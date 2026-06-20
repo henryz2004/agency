@@ -143,6 +143,68 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- "current task in progress" card (working mode) ---------------------- */
+/* Shown at the top of the panel when the selected agent is WORKING (not waiting
+   on you): a glanceable summary of what it's doing right now. The transcript
+   renders below as supporting context. */
+.cp-activity {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: linear-gradient(180deg, #0f1a16, #0c1512);
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.cp-activity.shell { border-left-color: #ffb454; background: linear-gradient(180deg, #1a160c, #15110a); }
+.cp-activity.idle { border-left-color: var(--muted2); background: var(--card2); }
+.cp-activity.done { border-left-color: var(--cyan); background: linear-gradient(180deg, #0c1620, #0b131c); }
+
+.cp-act-head { display: flex; align-items: center; gap: 8px; }
+.cp-act-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--green); box-shadow: 0 0 7px var(--green);
+  animation: cp-pulse 1.2s ease-in-out infinite;
+}
+.cp-act-dot.shell { background: #ffb454; box-shadow: 0 0 7px #ffb454; }
+.cp-act-dot.idle { background: var(--muted2); box-shadow: none; animation: none; }
+.cp-act-dot.done { background: var(--cyan); box-shadow: 0 0 7px var(--cyan); animation: none; }
+.cp-act-status {
+  font-family: var(--pixel); font-size: 8px; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--green);
+}
+.cp-activity.shell .cp-act-status { color: #ffb454; }
+.cp-activity.idle .cp-act-status { color: var(--muted); }
+.cp-activity.done .cp-act-status { color: var(--cyan); }
+
+/* the task/topic the agent is working toward */
+.cp-act-task {
+  font-size: 18px; line-height: 1.3; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+/* the live action line: "doing now Editing render.js" */
+.cp-act-now {
+  font-size: 16px; line-height: 1.35; color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.cp-act-label {
+  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted2); margin-right: 5px;
+}
+.cp-act-target { color: var(--cyan); }
+.cp-act-now.cp-act-pending { color: var(--muted2); }
+.cp-act-now.cp-act-pending::after { content: 'reading the transcript…'; }
+.cp-act-sub { font-size: 14px; color: #46d6cf; }
+
+/* divider between the activity card and the supporting transcript */
+.cp-section-label {
+  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted2);
+  margin: 6px 0 -2px; padding-top: 4px;
+  border-top: 1px dotted var(--line2);
+}
+
 /* notes + teammate launch brief */
 .cp-note {
   font-size: 15px;

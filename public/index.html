@@ -74,8 +74,8 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">Assumptions <span class="card-title-hint">drag to re-rate</span></div>
+      <details class="card card-fold">
+        <summary class="card-title">Assumptions <span class="card-title-hint">drag to re-rate</span></summary>
         <div class="slider">
           <label>Output tokens / engineer-hour <b id="vTok">3,000</b></label>
           <input type="range" id="sTok" min="500" max="12000" step="250" value="3000" />
@@ -92,7 +92,7 @@
           <label>Avg engineer salary <b id="vSal">$150k</b></label>
           <input type="range" id="sSal" min="80000" max="400000" step="10000" value="150000" />
         </div>
-      </div>
+      </details>
 
       <div class="card">
         <div class="card-title">Model mix <span class="card-title-hint">by output</span></div>
@@ -101,7 +101,7 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Departments <span class="card-title-hint">top projects by output</span></div>
+        <div class="card-title">Departments <span class="card-title-hint" id="deptHint">active · last 7d</span></div>
         <div id="deptList" class="deptlist"></div>
       </div>
 
@@ -110,10 +110,10 @@
         <canvas id="dailyCanvas" class="daily"></canvas>
       </div>
 
-      <div class="card">
-        <div class="card-title">All-time ledger</div>
+      <details class="card card-fold">
+        <summary class="card-title">All-time ledger <span class="card-title-hint">lifetime totals</span></summary>
         <div class="ledger" id="ledger"></div>
-      </div>
+      </details>
     </aside>
 
     <div id="panelHandle" class="panel-handle" title="Show stats">📊</div>

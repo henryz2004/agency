@@ -187,11 +187,19 @@ function buildUsage() {
   };
   const byProject = {};
   PROJECTS.forEach((p, i) => {
+    const out = 9_000_000 - i * 1_100_000 + rint(800000);
+    // First ~4 projects are "currently active" (recent output); the rest are
+    // stale all-time workspaces, so the departments panel's recency scope is
+    // visible in ?mock. lastTs is an ISO string to match the real adapter.
+    const recent = i < 4;
+    const lastTs = new Date(now0 - (recent ? i * 6 * 3600e3 : (9 + i * 3) * 86400e3)).toISOString();
     byProject[p] = {
-      out: 9_000_000 - i * 1_100_000 + rint(800000),
+      out,
+      recentOut: recent ? Math.round(out * 0.4) + rint(300000) : 0,
+      recentDays: recent ? 3 + rint(4) : 0,
       msgs: 1200 - i * 120, tools: 4200 - i * 480,
       agents: 90 - i * 10, sessions: 40 - i * 4,
-      lastTs: now0 - i * 3600e3,
+      lastTs,
     };
   });
   const lifetime = {
@@ -206,6 +214,7 @@ function buildUsage() {
     byProject,
     firstDay: daily[0].date,
     activeDays: 184,
+    recentWindowDays: 7,
   };
 }
 

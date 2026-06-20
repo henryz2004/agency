@@ -242,6 +242,91 @@ function renderNote(html) {
   return n;
 }
 
+// ---- "current task in progress" card (working mode) -----------------------
+// When an agent is WORKING (not waiting on you), the panel leads with this: a
+// glanceable summary of what it's up to RIGHT NOW — its activity, the live
+// action (current tool + file, from the transcript's lastAction), and the task
+// it's on. The transcript still renders below as supporting context.
+
+// The task/topic the agent is working toward — its AI chat title, the CLI task
+// name, or the last user prompt, in that order of usefulness.
+function taskLabel(a) {
+  return a.chatName || a.task || a.lastPrompt || null;
+}
+
+// One-word status + matching css class for the activity dot/headline.
+function statusBits(a) {
+  if (a.activity === 'working') return { cls: 'working', icon: '🟢', text: 'Shipping now' };
+  if (a.activity === 'shell') return { cls: 'shell', icon: '⚙', text: 'Running a command' };
+  if (a.state === 'done') return { cls: 'done', icon: '✅', text: 'Finished' };
+  return { cls: 'idle', icon: '💤', text: 'Idle' };
+}
+
+// Render the live "current action" line from a transcript lastAction object,
+// e.g. "Editing render.js" / "Running npm test". Returns '' when we have none.
+function actionLine(lastAction) {
+  if (!lastAction || !lastAction.verb) return '';
+  const verb = esc(lastAction.verb);
+  const target = lastAction.target ? `<span class="cp-act-target">${esc(lastAction.target)}</span>` : '';
+  return `${verb}${target ? ' ' + target : ''}`;
+}
+
+// The working-mode header card. `lastAction` arrives with the transcript fetch;
+// we render the card immediately (without it) and patch the action line in once
+// the fetch resolves, so the card never blocks on the network.
+function renderActivityCard(a, lastAction) {
+  const s = statusBits(a);
+  const card = document.createElement('div');
+  card.className = `cp-activity ${s.cls}`;
+
+  const head = document.createElement('div');
+  head.className = 'cp-act-head';
+  head.innerHTML = `<span class="cp-act-dot ${s.cls}"></span><span class="cp-act-status">${s.icon} ${esc(s.text)}</span>`;
+  card.appendChild(head);
+
+  const task = taskLabel(a);
+  if (task) {
+    const t = document.createElement('div');
+    t.className = 'cp-act-task';
+    t.textContent = task;
+    card.appendChild(t);
+  }
+
+  // The live action line; filled async (see show()). Hidden until it has text.
+  const act = document.createElement('div');
+  act.className = 'cp-act-now';
+  const line = actionLine(lastAction);
+  if (line) act.innerHTML = `<span class="cp-act-label">doing now</span> ${line}`;
+  else act.classList.add('cp-act-pending');
+  card.appendChild(act);
+
+  const sub = (a.subagents || []).length;
+  if (sub) {
+    const m = document.createElement('div');
+    m.className = 'cp-act-sub';
+    m.textContent = `🤖 ${sub} subagent${sub > 1 ? 's' : ''} running`;
+    card.appendChild(m);
+  }
+  return card;
+}
+
+// Update an already-rendered activity card's live action line in place (called
+// after the transcript fetch resolves with lastAction).
+function fillActionLine(card, lastAction) {
+  if (!card) return;
+  const act = card.querySelector('.cp-act-now');
+  if (!act) return;
+  const line = actionLine(lastAction);
+  if (line) {
+    act.innerHTML = `<span class="cp-act-label">doing now</span> ${line}`;
+    act.classList.remove('cp-act-pending');
+  } else {
+    // No discernible in-flight action (e.g. mid-thought) — say so plainly.
+    act.innerHTML = '<span class="cp-act-label">doing now</span> <span class="cp-dim">thinking…</span>';
+    act.classList.remove('cp-act-pending');
+  }
+}
+
 // ---- reply box (Control Phase-1) ------------------------------------------
 // When the selected agent is paused on a Stop hook (awaitingReply), render a
 // reply box ABOVE the transcript: a textarea + Send that POSTs /api/reply
@@ -403,15 +488,28 @@ function show(agent) {
     return;
   }
 
-  // If this agent is paused on a Stop hook, the reply box goes ABOVE the
-  // transcript. Render it immediately (don't wait on the transcript fetch) so a
-  // paused agent is answerable the instant it's selected.
-  const replyBox = agent.awaitingReply ? renderReplyBox(agent) : null;
+  // CONTEXTUAL MODE — the panel adapts to the agent's state:
+  //   • WAITING ON YOU (awaitingReply): reply box pinned on top, then the recent
+  //     conversation below so you can see what it asked and answer.
+  //   • WORKING / shell (and NOT waiting): lead with the "current task in
+  //     progress" card (what it's doing right now), transcript below as context.
+  //   • IDLE / done: just the conversation.
+  // The reply box + activity card render IMMEDIATELY (before the transcript
+  // fetch) so the panel is useful the instant a desk is clicked; the transcript
+  // and the live action line fill in once the fetch resolves.
+  const waiting = !!agent.awaitingReply;
+  const working = !waiting && (agent.activity === 'working' || agent.activity === 'shell');
+
+  const replyBox = waiting ? renderReplyBox(agent) : null;
+  // The activity card is pre-built so we can patch its action line in async.
+  const activityCard = working ? renderActivityCard(agent, null) : null;
+
   bodyEl.innerHTML = '';
   if (replyBox) bodyEl.appendChild(replyBox);
+  if (activityCard) bodyEl.appendChild(activityCard);
   const loading = document.createElement('div');
   loading.className = 'cp-loading';
-  loading.textContent = 'Opening chat…';
+  loading.textContent = working ? 'Loading recent activity…' : 'Opening chat…';
   bodyEl.appendChild(loading);
 
   const token = reqToken; // already bumped at the top of show(); guards this fetch
@@ -420,10 +518,18 @@ function show(agent) {
     .then((r) => r.json())
     .then((data) => {
       if (token !== reqToken) return; // a newer selection superseded this one
-      // Keep the reply box (if any) pinned at the top; rebuild only below it.
+      // Patch the live action line into the activity card from the fetched data.
+      if (activityCard) fillActionLine(activityCard, data && data.lastAction);
+      // Keep the pinned header (reply box / activity card) at the top; rebuild
+      // only the transcript region below it.
       bodyEl.innerHTML = '';
       if (replyBox) bodyEl.appendChild(replyBox);
+      if (activityCard) bodyEl.appendChild(activityCard);
       const messages = (data && data.messages) || [];
+      // In working mode the transcript is supporting context, so label it.
+      if (working && messages.length) {
+        bodyEl.appendChild(sectionLabel('Recent activity'));
+      }
       if (messages.length) {
         bodyEl.appendChild(renderMessages(messages));
       } else {
@@ -433,18 +539,30 @@ function show(agent) {
       }
       const acts = actionsFor(agent, data);
       if (acts) bodyEl.appendChild(acts);
-      // Newest message is at the bottom; scroll there — unless a reply box is
-      // pinned at the top, in which case keep it in view (that's the point).
-      if (!replyBox) bodyEl.scrollTop = bodyEl.scrollHeight;
+      // Newest message is at the bottom; scroll there — UNLESS a pinned header
+      // (reply box or activity card) is up top, in which case keep it in view
+      // (that's the point of leading with it).
+      if (!replyBox && !activityCard) bodyEl.scrollTop = bodyEl.scrollHeight;
     })
     .catch(() => {
       if (token !== reqToken) return;
+      if (activityCard) fillActionLine(activityCard, null);
       bodyEl.innerHTML = '';
       if (replyBox) bodyEl.appendChild(replyBox);
+      if (activityCard) bodyEl.appendChild(activityCard);
       bodyEl.appendChild(renderNote('<span class="cp-dim">Couldn\'t load the transcript.</span>'));
       const acts = actionsFor(agent, null);
       if (acts) bodyEl.appendChild(acts);
     });
+}
+
+// A small uppercase section divider used between the activity card and the
+// supporting transcript in working mode.
+function sectionLabel(text) {
+  const el = document.createElement('div');
+  el.className = 'cp-section-label';
+  el.textContent = text;
+  return el;
 }
 
 // Normalize the event detail: accept either { agent } or the agent directly,
