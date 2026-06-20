@@ -76,7 +76,24 @@ export const SPR = {
   folderRed: [211, 119, 11, 8], // upright file folder, red
   folderBlue: [211, 129, 11, 8], // upright file folder, blue
   folderGreen: [211, 140, 11, 8], // upright file folder, green
+
+  // --- standing worker characters (bottom-left of the sheet, by the cat/corgi) -
+  // Five front-facing standing people, extracted via the same alpha-gutter
+  // connected-component bbox pass as the furniture (8-connected, human-sized
+  // blobs). Used as the HYBRID mode's character layer (drawCharacter STATIC kind)
+  // until generated animated atlases swap in. Boxes are tight to the visible
+  // pixels, so their feet sit at sy+sh-1 — anchor on that for floor placement.
+  // worker2's box is wider because that pose raises an arm (a little wave).
+  worker1: [2, 105, 15, 23],  // dark hair, grey top, blue jeans
+  worker2: [19, 104, 19, 24], // auburn hair, white logo tee, arm raised (wave)
+  worker3: [40, 107, 13, 21], // grey hair + glasses, white "C" tee (senior look)
+  worker4: [3, 132, 17, 23],  // red hair, blue tee
+  worker5: [22, 132, 17, 23], // dark hair, dark-red tee
 };
+
+// Ordered list of the standing-worker SPR keys, for deterministic per-agent
+// assignment in hybrid mode (worker[hash % WORKER_SPRITES.length]).
+export const WORKER_SPRITES = ['worker1', 'worker2', 'worker3', 'worker4', 'worker5'];
 
 export const sprW = (name, s = 1) => SPR[name][2] * s;
 export const sprH = (name, s = 1) => SPR[name][3] * s;

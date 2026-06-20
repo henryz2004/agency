@@ -1,0 +1,32 @@
+{
+  "name": "dev-glasses",
+  "image": "dev-glasses.png",
+  "cellW": 27,
+  "cellH": 34,
+  "cols": 4,
+  "anchorX": 13,
+  "anchorY": 33,
+  "anims": {
+    "idle": [
+      0,
+      1
+    ],
+    "type": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "walk": [
+      8,
+      9,
+      10,
+      11
+    ]
+  },
+  "fps": {
+    "idle": 2,
+    "type": 6,
+    "walk": 8
+  }
+}

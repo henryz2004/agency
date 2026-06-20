@@ -5,13 +5,54 @@
 // on hover / click.
 
 import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, drawNeedsYou, colorFor, teamColorHex } from './sprites.js';
-import { sheetReady, blit, blitStanding, sprW, sprH } from './office-atlas.js';
+import { sheetReady, blit, blitStanding, sprW, sprH, WORKER_SPRITES } from './office-atlas.js';
+import { loadCharacter, staticCharacter, drawCharacterState } from './characters.js';
+
+// Hybrid render mode (?render=hybrid): keep the sprite-sheet ENVIRONMENT but
+// swap the procedural worker BODY for a sheet/character sprite. Default stays
+// the current procedural renderer so the two can be compared.
+const HYBRID = new URLSearchParams(location.search).get('render') === 'hybrid';
+
+// The hybrid character layer is two-tier:
+//  - STATIC baseline: the five front-facing standing workers already on the
+//    office sheet (office-atlas.js worker1..5). Always available the moment the
+//    sheet loads — zero generated assets, so this is what hybrid shows today.
+//  - ANIMATED upgrade: generated sprite atlases dropped into public/characters/.
+//    When one is assigned to an agent it's used INSTEAD of the static sprite.
+// Each agent is mapped to one character deterministically by its stable seed so
+// its look doesn't reshuffle between polls.
+const staticChars = WORKER_SPRITES.map(staticCharacter).filter(Boolean);
+
+// Loaded animated atlases ({kind:'animated', atlas, img}). Populated async; any
+// that fail to load are skipped (fail-soft). These are the generated
+// idle/type/walk sprite characters (27x34, cols=4, anchor (13,33)); each agent
+// is mapped to one in animatedCharFor() below for per-agent stability. The
+// static sheet workers stay the fallback if none of these load.
+const CHARACTER_MANIFEST = [
+  '/characters/dev-auburn.json',
+  '/characters/dev-glasses.json',
+  '/characters/dev-beanie.json',
+];
+let animatedChars = []; // [{kind:'animated', atlas, img}]
+
+async function loadCharacters() {
+  const results = await Promise.all(CHARACTER_MANIFEST.map((u) => loadCharacter(u).catch(() => null)));
+  animatedChars = results.filter(Boolean);
+}
 
 const WALL_H = 72; // back-wall band: tall enough for standing furniture + windows
 const MARGIN = 18; // outer breathing room around the whole floor
 const COL_GAP = 12; // horizontal gap between two desks in the same cluster
-const ROW_GAP = 34; // vertical band beneath each desk that holds its name tag
 const FIT_PAD = 28; // slack left around the office when fitting to the frame
+// (the old ROW_GAP=34 name band is gone — superseded by NAME_BAND below.)
+
+// POD_H (92) is the pod's HIT-TEST box (kept for podAt / sprites.js), but the
+// drawn worker+desk content only spans head (py0+6) → desk front edge (py0+60),
+// with the subagent "minions" reaching to ~py0+71. POD_CONTENT_H is that real
+// occupied height — what the rug, row stride, and nameplate should pack to, so
+// clusters stop rendering as ~2x-tall portrait rectangles with marooned desks.
+const POD_CONTENT_H = 74; // head → minion feet (py0+6 → ~py0+74)
+const NAME_GAP = 2; // gap between content bottom and the nameplate
 
 // --- cluster ("neighborhood") geometry ------------------------------------
 // Modern offices group 2–4 desks into small pods on a shared rug, with lounge
@@ -94,6 +135,7 @@ export function initOffice(canvasEl, labelLayerEl) {
   if (recenterBtn) recenterBtn.addEventListener('click', () => fitView());
 
   setupInteractions();
+  if (HYBRID) loadCharacters(); // async; loop falls back to procedural until ready
   window.addEventListener('resize', onResize);
   requestAnimationFrame(loop);
   setInterval(tickUptimes, 1000);
@@ -128,6 +170,40 @@ function seedOf(a, i) {
   return (h % 100000) + 1;
 }
 
+// ---- hybrid character mapping --------------------------------------------
+// Animated-atlas assignment policy: map each agent to one of the loaded animated
+// characters deterministically by its stable seed, so its look doesn't reshuffle
+// between polls. Falls through to a static sheet worker only when no animated
+// atlas has loaded yet. (To restrict animation to a subset — e.g. only the lead
+// or only Claude agents — gate here on a/role/source/model instead.)
+function animatedCharFor(a, i) {
+  return animatedChars.length ? animatedChars[seedOf(a, i) % animatedChars.length] : null;
+}
+
+// Resolve the character an agent renders as in hybrid: an assigned animated
+// atlas if any, otherwise a deterministic static sheet worker (stable across
+// polls via the agent's seed — same stability contract as the procedural seed).
+// Returns null (→ procedural body) when no character can be drawn yet: no worker
+// sprites at all, OR a static worker was chosen but the office sheet hasn't
+// loaded (its SPR rects exist before the image does, so drawStatic would no-op
+// and leave an empty chair for the first few frames). Animated chars already
+// guard on img.complete, so they're fine to return pre-sheet.
+function characterFor(a, i) {
+  const animated = animatedCharFor(a, i);
+  if (animated) return animated;
+  if (!staticChars.length || !sheetReady()) return null;
+  return staticChars[seedOf(a, i) % staticChars.length];
+}
+
+// Map agent activity → character animation state: model generating or a shell
+// command running both read as "at the keyboard" (type); everything else idles.
+// (Static sheet workers ignore this — they have a single standing pose.)
+function charStateFor(a) {
+  const act = a && a.activity;
+  if (act === 'working' || act === 'shell') return 'type';
+  return 'idle';
+}
+
 // ---- layout + camera -----------------------------------------------------
 // Modern "neighborhood" floor plan instead of a uniform grid. We partition the
 // agents into small desk CLUSTERS (2–4 pods on a shared rug), then flow those
@@ -139,14 +215,25 @@ function seedOf(a, i) {
 // totalSlots() — so selection, the DOM nameplates, the chat panel and the
 // awaitingReply indicator all keep working unchanged.
 
-// A cluster's footprint for `count` desks, laid out in up to 2 columns.
+// The "name band" beneath each desk row: a thin strip holding the DOM nameplate.
+// Replaces the old full ROW_GAP(34) of dead floor between rows.
+const NAME_BAND = 18; // room for the nameplate chip under each desk row
+// Vertical stride between desk rows inside a cluster: real content + name band.
+// Far tighter than the old POD_H+ROW_GAP-8 (=118) stride, which reserved a whole
+// extra POD_H of empty floor and stranded the desks at the rug's top.
+const POD_ROW_STRIDE = POD_CONTENT_H + NAME_BAND; // 74 + 18 = 92
+
+// A cluster's footprint for `count` desks, laid out in up to 2 columns. Height
+// hugs the actual desk content (POD_CONTENT_H per row + a name band) instead of
+// the full hit-test POD_H, so the rug fits the desks rather than dwarfing them.
 function clusterDims(count) {
   const ccols = count <= 1 ? 1 : 2;
   const crows = Math.ceil(count / ccols);
   return {
     ccols, crows,
     w: ccols * POD_W + (ccols - 1) * COL_GAP + CLUSTER_PAD * 2,
-    h: crows * POD_H + (crows - 1) * (ROW_GAP - 8) + ROW_GAP + CLUSTER_PAD,
+    // CLUSTER_PAD top + each row (content + its name band) + CLUSTER_PAD bottom.
+    h: CLUSTER_PAD * 2 + crows * POD_ROW_STRIDE,
   };
 }
 
@@ -271,7 +358,7 @@ function planFloor(n) {
         const c = k % ccols, r = Math.floor(k / ccols);
         podSlots.push({
           x: b.x + CLUSTER_PAD + c * (POD_W + COL_GAP),
-          y: b.y + CLUSTER_PAD + r * (POD_H + ROW_GAP - 8),
+          y: b.y + CLUSTER_PAD + r * POD_ROW_STRIDE,
         });
       }
     } else {
@@ -548,7 +635,9 @@ function buildLabels() {
     el.className = 'tag';
     el.dataset.i = String(i);
     el.style.left = `${o.x + POD_W / 2}px`;
-    el.style.top = `${o.y + POD_H + 4}px`;
+    // Pin the nameplate just under the desk content (head→minions ≈ POD_CONTENT_H)
+    // instead of POD_H+4 (which floated it in the dead floor below the old rug).
+    el.style.top = `${o.y + POD_CONTENT_H + NAME_GAP}px`;
     // the lead's nameplate gets a small gold "PM" tag; teammate chips wear the
     // team color so the roster groups read at a glance.
     const leadTag = a.role === 'lead' ? `<span class="tag-lead">PM</span>` : '';
@@ -1030,6 +1119,38 @@ function drawDeskProps(px0, py0, i) {
   if (i % 2 === 0) blitStanding(ctx, folders[i % folders.length], px0 + POD_W - 15, lip);
 }
 
+// Stage a character at a pod's desk. The procedural desk slab top is at py0+50;
+// we anchor the character so its anchor (feet for the standing sheet sprites,
+// the atlas seat/feet marker for generated ones) lands on a baseline at the
+// desk's near edge. The character is drawn AFTER the bodyless workstation, so it
+// paints over the desk's front lip — which for a standing worker reads as "at
+// the desk", legs in front of the near edge. Centred on the worker centre-x
+// (px0+22), left of the monitor (px0+47) so the character never covers its screen.
+//
+// The static sheet workers are SHORTER standing poses (~21-24px) than the
+// generated 34px atlas; a touch-lower baseline keeps their feet near the chair
+// so they don't appear to float above the desk.
+const SEAT_DX = 22; // = worker centre-x (cx)
+const SEAT_BASELINE_ANIM = 58; // generated atlas: seat line just below the desk front edge
+const SEAT_BASELINE_STATIC = 62; // standing sheet worker: a hair lower so feet sit at the desk
+function drawSeatedCharacter(px0, py0, char, a, i, clockMs) {
+  const state = charStateFor(a);
+  // per-agent phase so a row of typists doesn't keystroke in lockstep
+  const phase = seedOf(a, i) % 17;
+  const baseline = char.kind === 'static' ? SEAT_BASELINE_STATIC : SEAT_BASELINE_ANIM;
+  drawCharacterState(ctx, px0 + SEAT_DX, py0 + baseline, char, { state, clockMs, phase });
+}
+
+// Head-anchored badges (PM crown, selection plumbob, "needs you" bubble) are
+// positioned relative to the head top. The procedural worker's head sits at
+// py0+6; a seated character's head sits lower, so in hybrid we drop the badge
+// anchor by HYBRID_HEAD_DROP to keep the badge hugging the head rather than
+// floating in the gap above it.
+const HYBRID_HEAD_DROP = 18;
+function badgeAnchorY(py0, hasChar) {
+  return hasChar ? py0 + HYBRID_HEAD_DROP : py0;
+}
+
 function loop(t) {
   frame = Math.floor(t / 130); // ~7.7fps "typing" cadence
   if (ctx && bufW) {
@@ -1043,6 +1164,13 @@ function loop(t) {
         // background teammates wear their team color; everyone else keeps their
         // roster shirt.
         const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
+        // In hybrid mode, draw a sprite character in the seat; the workstation
+        // (chair/desk/monitor/LED/minions) is still drawn by sprites.js but
+        // BODYLESS. Falls back to the full procedural worker if no character is
+        // available. Animated characters are SEATED sprites that bring their own
+        // chair, so suppress the procedural chair for them (noChair) to avoid a
+        // double chair; static standing sheet workers keep the procedural chair.
+        const char = HYBRID ? characterFor(a, i) : null;
         drawWorker(ctx, o.x, o.y, {
           skin: a.skin,
           hair: a.hair,
@@ -1053,13 +1181,17 @@ function loop(t) {
           subagents: a.subagents || [],
           frame,
           seed: seedOf(a, i),
+          bodyless: !!char,
+          noChair: !!char && char.kind === 'animated',
         });
+        if (char) drawSeatedCharacter(o.x, o.y, char, a, i, t);
         drawDeskProps(o.x, o.y, i); // sheet props on the front lip of busy desks
-        if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, o.y, frame); // PM crown
+        const badgeY = badgeAnchorY(o.y, !!char); // hug the seated character's head in hybrid
+        if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, badgeY, frame); // PM crown
         // "needs you" bubble for any agent blocked on the user's reply (Control
         // Phase-1 sets awaitingReply). Floats at the head's upper-right, clear of
         // the crown / selection plumbob which sit centred above the head.
-        if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, o.y, frame);
+        if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, badgeY, frame);
       } else {
         // vacant desk (only appears if a slot ever outlives its agent)
         drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
@@ -1077,7 +1209,10 @@ function loop(t) {
       drawSelectRing(ctx, o.x, o.y, c.screen, frame, true);
       // the lead already wears a crown at this spot — keep it visible instead of
       // painting the selection plumbob over it (the ring still marks selection).
-      if (agents[selIdx].role !== 'lead') drawPlumbob(ctx, o.x + 22, o.y, frame);
+      if (agents[selIdx].role !== 'lead') {
+        const selChar = HYBRID ? characterFor(agents[selIdx], selIdx) : null;
+        drawPlumbob(ctx, o.x + 22, badgeAnchorY(o.y, !!selChar), frame);
+      }
     }
   }
   requestAnimationFrame(loop);

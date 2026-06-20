@@ -80,8 +80,15 @@ function shade(hex, amt) {
 // glowing monitor whose color encodes the model tier.
 // (px0, py0) = top-left of the pod cell in buffer coords.
 export function drawWorker(ctx, px0, py0, opts) {
-  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null } = opts;
+  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null, bodyless = false, noChair = false } = opts;
   const t = colorFor(model);
+  // `bodyless`: draw the WORKSTATION (chair, desk, keyboard, monitor, LED,
+  // minions) but skip the procedural PERSON — hybrid mode overlays a sprite
+  // character in the seat instead.
+  // `noChair`: additionally skip the procedural chair. The generated animated
+  // characters are SEATED sprites that bring their OWN chair, so the procedural
+  // chair would double up behind them; hybrid passes noChair for those. The
+  // STATIC standing sheet workers have no chair of their own, so they keep it.
   // working = model generating (types, tier-colored output on screen);
   // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
   const typing = activity === 'working';
@@ -129,14 +136,19 @@ export function drawWorker(ctx, px0, py0, opts) {
   const sipCycle = (frame + seed * 3) % 36;
   const sipping = !vacant && v.sips && !typing && sipCycle < 3;
 
-  // chair back (per-agent upholstery color)
+  // chair back (per-agent upholstery color) — skipped under noChair so a seated
+  // sprite character that includes its own chair doesn't show a double chair.
   const chair = v.chair;
-  px(ctx, cx - 11, py0 + 16, 22, 34, chair);
-  px(ctx, cx - 11, py0 + 16, 22, 3, shade(chair, 18));
-  px(ctx, cx - 13, py0 + 22, 3, 22, shade(chair, -16));
-  px(ctx, cx + 10, py0 + 22, 3, 22, shade(chair, -16));
+  if (!noChair) {
+    px(ctx, cx - 11, py0 + 16, 22, 34, chair);
+    px(ctx, cx - 11, py0 + 16, 22, 3, shade(chair, 18));
+    px(ctx, cx - 13, py0 + 22, 3, 22, shade(chair, -16));
+    px(ctx, cx + 10, py0 + 22, 3, 22, shade(chair, -16));
+  }
 
-  if (!vacant) {
+  // hybrid (bodyless): the chair above stays, but the procedural person below is
+  // skipped — a generated sprite character is drawn into the seat by the caller.
+  if (!vacant && !bodyless) {
     const hdx = headTurn; // shorthand: horizontal head/face offset
     const hy = py0 + 6 - headDy; // head top y, lifts slightly on breath-in
     // hair / headwear (top + sides), shifted with the head turn
@@ -260,7 +272,9 @@ export function drawWorker(ctx, px0, py0, opts) {
   // well above the name-plate / minion strip. Suppress the left mug while the
   // worker is sipping (the mug is in hand then).
   if (!vacant) {
-    if (!sipping) drawDeskItem(ctx, px0 + 5, deskTop, v.deskItemL, t, frame);
+    // suppress the left mug only when the procedural worker is mid-sip (mug in
+    // hand); in bodyless/hybrid there's no hand, so the mug always sits on the desk.
+    if (!sipping || bodyless) drawDeskItem(ctx, px0 + 5, deskTop, v.deskItemL, t, frame);
     // right slot tucks into the keyboard→monitor gap; the monitor (drawn next)
     // overlaps any 1px spill so a wider prop reads as sitting beside the screen.
     drawDeskItem(ctx, px0 + 32, deskTop, v.deskItemR, t, frame);

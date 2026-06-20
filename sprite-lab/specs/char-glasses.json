@@ -1,0 +1,20 @@
+{
+  "id": "dev-glasses",
+  "identity": "a chibi office worker with dark brown skin, short black coily hair, round glasses, and a maroon/burgundy collared polo shirt with khaki pants.",
+  "target_h": 32,
+  "colors": 20,
+  "states": {
+    "idle": {
+      "frames": 2,
+      "action": "the SAME seated character at rest, a subtle idle (frame 1 sitting upright and relaxed, frame 2 a tiny breathing slump / blink) — almost no movement"
+    },
+    "type": {
+      "frames": 4,
+      "action": "the SAME seated character TYPING, both forearms raised and hands held out in front at typing height (as if on an invisible keyboard in their lap), the hands and fingers bobbing slightly up and down across the 4 frames while everything else stays still"
+    },
+    "walk": {
+      "frames": 4,
+      "action": "the SAME character in a side-view WALK CYCLE (contact, passing, contact, passing), seen from the side, feet on a common baseline"
+    }
+  }
+}
