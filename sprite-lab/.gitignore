@@ -1,0 +1,13 @@
+# raw gpt-image-2 generations — multi-MB 1254px PNGs, regenerable
+raw/
+raw_*/
+
+# scratch images from iteration; keep only reference inputs + example outputs
+*.png
+*.gif
+!ref_char.png
+!style_ref.png
+!vend_ref.png
+!auburn-walk.png
+!auburn-walk_preview.gif
+!coffee.png
