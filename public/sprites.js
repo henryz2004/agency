@@ -80,7 +80,7 @@ function shade(hex, amt) {
 // glowing monitor whose color encodes the model tier.
 // (px0, py0) = top-left of the pod cell in buffer coords.
 export function drawWorker(ctx, px0, py0, opts) {
-  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null, bodyless = false, noChair = false } = opts;
+  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null, bodyless = false, noChair = false, noDeskMonitor = false } = opts;
   const t = colorFor(model);
   // `bodyless`: draw the WORKSTATION (chair, desk, keyboard, monitor, LED,
   // minions) but skip the procedural PERSON — hybrid mode overlays a sprite
@@ -89,6 +89,9 @@ export function drawWorker(ctx, px0, py0, opts) {
   // characters are SEATED sprites that bring their OWN chair, so the procedural
   // chair would double up behind them; hybrid passes noChair for those. The
   // STATIC standing sheet workers have no chair of their own, so they keep it.
+  // `noDeskMonitor`: skip the procedural desk slab, keyboard, desk clutter, and
+  // monitor — hybrid draws those from the office SHEET (real desk + tinted
+  // monitor + keyboard) in render.js instead. The status LED and minions stay.
   // working = model generating (types, tier-colored output on screen);
   // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
   const typing = activity === 'working';
@@ -258,6 +261,11 @@ export function drawWorker(ctx, px0, py0, opts) {
     }
   }
 
+  // --- procedural desk slab + keyboard + clutter + monitor ---
+  // Skipped under noDeskMonitor (hybrid sheet-workstation mode), where the desk,
+  // tinted monitor and keyboard come from the office sheet instead. The status
+  // LED and subagent minions below are kept in both modes.
+  if (!noDeskMonitor) {
   // desk slab
   px(ctx, px0 + 2, deskTop, POD_W - 4, 7, '#6b4f3a');
   px(ctx, px0 + 2, deskTop, POD_W - 4, 2, '#7d5f48');
@@ -331,6 +339,7 @@ export function drawWorker(ctx, px0, py0, opts) {
   // stand
   px(ctx, mx - 2, mTop + 16, 4, 3, '#3a4150');
   px(ctx, mx - 5, mTop + 19, 10, 2, '#2b313e');
+  } // end if (!noDeskMonitor)
 
   // status LED: green pulse = generating, amber pulse = shell running,
   // steady cyan = finished, gray = idle

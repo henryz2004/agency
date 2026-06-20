@@ -5,7 +5,7 @@
 // on hover / click.
 
 import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, drawNeedsYou, colorFor, teamColorHex } from './sprites.js';
-import { sheetReady, blit, blitStanding, sprW, sprH, WORKER_SPRITES } from './office-atlas.js';
+import { sheetReady, blit, blitStanding, blitMonitor, MONITOR_SCREEN, sprW, sprH, WORKER_SPRITES } from './office-atlas.js';
 import { loadCharacter, staticCharacter, drawCharacterState } from './characters.js';
 
 // Hybrid render mode (?render=hybrid): keep the sprite-sheet ENVIRONMENT but
@@ -24,15 +24,17 @@ const HYBRID = new URLSearchParams(location.search).get('render') === 'hybrid';
 const staticChars = WORKER_SPRITES.map(staticCharacter).filter(Boolean);
 
 // Loaded animated atlases ({kind:'animated', atlas, img}). Populated async; any
-// that fail to load are skipped (fail-soft). These are the generated
-// idle/type/walk sprite characters (27x34, cols=4, anchor (13,33)); each agent
-// is mapped to one in animatedCharFor() below for per-agent stability. The
-// static sheet workers stay the fallback if none of these load.
-const CHARACTER_MANIFEST = [
-  '/characters/dev-auburn.json',
-  '/characters/dev-glasses.json',
-  '/characters/dev-beanie.json',
-];
+// that fail to load are skipped (fail-soft).
+//
+// CURRENTLY EMPTY ON PURPOSE: the front-facing static sheet workers are the
+// coherent character layer — they match the pack/procedural perspective and
+// scale. The generated idle/type/walk atlases (27x34, cols=4, anchor (13,33))
+// turned out side-profile and ~1.5x oversized, clashing with the front-facing
+// pack-scale office, so they're shelved pending a front-facing, pack-scale
+// regen. The animated infrastructure below (loadCharacters, the drawCharacter
+// animated branch, the animatedCharFor hook) is kept intact and unfed — re-add
+// the atlas paths here to revive them once regenerated.
+const CHARACTER_MANIFEST = [];
 let animatedChars = []; // [{kind:'animated', atlas, img}]
 
 async function loadCharacters() {
@@ -143,6 +145,16 @@ export function initOffice(canvasEl, labelLayerEl) {
 
 export function setAgents(next) {
   agents = next || [];
+  // Neighborhoods (hybrid): group co-located agents by project so each pod is a
+  // team's area. Stable-sort by project key, keeping the original order within a
+  // project (lead-first, deterministic across polls). Safe because selection is
+  // re-resolved by selKey below — nothing outside holds an index into agents[].
+  if (HYBRID && agents.length) {
+    agents = agents
+      .map((a, i) => [a, i])
+      .sort((x, y) => projectKey(x[0]).localeCompare(projectKey(y[0])) || (x[1] - y[1]))
+      .map((p) => p[0]);
+  }
   // Re-resolve the selected agent by its stable key so the ring/card stay on
   // the same person even if the roster reorders between polls.
   selIdx = selKey ? agents.findIndex((a) => keyOf(a) === selKey) : -1;
@@ -156,6 +168,12 @@ export function setAgents(next) {
 function keyOf(a) {
   if (!a) return null;
   return a.sessionId || (a.pid != null ? `pid:${a.pid}` : null);
+}
+
+// The grouping key for neighborhoods: an agent's project (falls back to cwd).
+// Co-located agents (same project) share a pod / team rug.
+function projectKey(a) {
+  return String((a && (a.project || a.cwd)) || '');
 }
 
 // A stable per-agent sprite seed. Real sessions key off pid; in-process
@@ -176,6 +194,9 @@ function seedOf(a, i) {
 // between polls. Falls through to a static sheet worker only when no animated
 // atlas has loaded yet. (To restrict animation to a subset — e.g. only the lead
 // or only Claude agents — gate here on a/role/source/model instead.)
+// NOTE: CHARACTER_MANIFEST is currently [] (see the note above), so animatedChars
+// is empty and this returns null for everyone → every agent renders as a static
+// sheet worker. This logic is ready as-is the moment a front-facing atlas is fed in.
 function animatedCharFor(a, i) {
   return animatedChars.length ? animatedChars[seedOf(a, i) % animatedChars.length] : null;
 }
@@ -258,6 +279,37 @@ function clusterSizes(n) {
   return sizes;
 }
 
+// --- Neighborhoods (hybrid) pod geometry -----------------------------------
+// A hybrid pod is a SINGLE horizontal row of `count` workers standing behind one
+// continuous counter (no 2-column grid). Per-slot width stays POD_W so the
+// monitor/keyboard/hit-box composition is unchanged; slots are edge-to-edge (the
+// counter is continuous, a leg-divider — not a gap — separates stations).
+function clusterDimsRow(count) {
+  return {
+    ccols: count, crows: 1,
+    w: count * POD_W + CLUSTER_PAD * 2,
+    h: CLUSTER_PAD * 2 + POD_CONTENT_H + NAME_BAND,
+  };
+}
+
+// Group the (already project-sorted) agents into pods, splitting each project's
+// run into pods of 2–4 via clusterSizes; singletons stay 1-wide (a solo team
+// area). Co-located agents thus share a pod / team rug.
+function clusterSizesGrouped(list) {
+  const sizes = [];
+  let i = 0;
+  while (i < list.length) {
+    const key = projectKey(list[i]);
+    let j = i;
+    while (j < list.length && projectKey(list[j]) === key) j++;
+    const run = j - i; // this project's agent count
+    if (run <= 4) sizes.push(run);
+    else clusterSizes(run).forEach((s) => sizes.push(s));
+    i = j;
+  }
+  return sizes;
+}
+
 // Build the whole floor plan: cluster + decor blocks flowed into rows, then
 // absolute pod positions. Width target adapts to the desk count so few agents
 // stay compact and many spread into a believable open-plan floor.
@@ -266,7 +318,8 @@ function planFloor(n) {
   decorZones = [];
   clusters = [];
 
-  const sizes = clusterSizes(Math.max(n, 0));
+  // Hybrid groups by project (each pod = a team); default partitions the count.
+  const sizes = HYBRID ? clusterSizesGrouped(agents) : clusterSizes(Math.max(n, 0));
   // Empty floor (no live agents): still a furnished, lived-in lounge rather than
   // a bare strip — a couch zone flanked by greenery reads as "quiet office".
   if (sizes.length === 0) {
@@ -291,7 +344,7 @@ function planFloor(n) {
   const socialOrder = ['green', 'lounge', 'green', 'collab', 'green', 'lounge'];
   let social = 0;
   sizes.forEach((sz, ci) => {
-    const d = clusterDims(sz);
+    const d = HYBRID ? clusterDimsRow(sz) : clusterDims(sz);
     blocks.push({ kind: 'cluster', count: sz, w: d.w, h: d.h, dims: d, seed: 101 + ci * 7 });
     if (ci < sizes.length - 1) { // never trail a social zone past the last cluster
       const kind = socialOrder[social % socialOrder.length];
@@ -355,11 +408,17 @@ function planFloor(n) {
       clusters.push({ x: b.x, y: b.y, w: b.w, h: b.h, count: b.count, seed: b.seed });
       const { ccols } = b.dims;
       for (let k = 0; k < b.count; k++) {
-        const c = k % ccols, r = Math.floor(k / ccols);
-        podSlots.push({
-          x: b.x + CLUSTER_PAD + c * (POD_W + COL_GAP),
-          y: b.y + CLUSTER_PAD + r * POD_ROW_STRIDE,
-        });
+        if (HYBRID) {
+          // single horizontal row: workers stand side-by-side behind the counter,
+          // slots edge-to-edge (no COL_GAP — the counter is continuous).
+          podSlots.push({ x: b.x + CLUSTER_PAD + k * POD_W, y: b.y + CLUSTER_PAD });
+        } else {
+          const c = k % ccols, r = Math.floor(k / ccols);
+          podSlots.push({
+            x: b.x + CLUSTER_PAD + c * (POD_W + COL_GAP),
+            y: b.y + CLUSTER_PAD + r * POD_ROW_STRIDE,
+          });
+        }
       }
     } else {
       decorZones.push({ type: b.kind, x: b.x, y: b.y, w: b.w, h: b.h, seed: b.seed });
@@ -837,12 +896,45 @@ function drawFloor() {
 function drawRoom() {
   if (!sheetReady()) { drawFloor(); drawWall(); return; }
 
-  drawWoodFloor();
-  drawClusterRugs();
+  // Neighborhoods (hybrid): the real blue SHEET floor tile + translucent team
+  // rugs under each pod. Default keeps the procedural warm-wood floor + teal rugs.
+  if (HYBRID) { drawBlueFloor(); drawTeamRugs(); }
+  else { drawWoodFloor(); drawClusterRugs(); }
   drawDaylight();
   drawBackWall();
   drawCeiling();
   drawDecorZones();
+}
+
+// --- floor: the real blue brick SHEET tile (Neighborhoods / hybrid) ----------
+// Tiles floorBlue [73×24] across the whole floor area, offsetting alternate rows
+// by half a tile so the brick joints stagger instead of lining up into columns.
+function drawBlueFloor() {
+  const tw = sprW('floorBlue'), th = sprH('floorBlue');
+  for (let y = WALL_H, row = 0; y < bufH; y += th, row++) {
+    const off = row % 2 ? -Math.floor(tw / 2) : 0; // stagger alternate rows
+    for (let x = off; x < bufW; x += tw) blit(ctx, 'floorBlue', x, y);
+  }
+}
+
+// Team rug: a translucent lighter-blue rectangle with a white border that GROUPS
+// each pod's desks into a neighbourhood, sitting on the floor in front of (below)
+// the counter. Co-located agents share a pod (grouped by project), so the rug
+// reads as "this team's area". Mirrors the layout_c mockup.
+function drawTeamRugs() {
+  clusters.forEach((c) => {
+    // the rug wraps the WHOLE pod — the counter band + the floor in front — so the
+    // white border frames "this team's area" (the counter is drawn on top later).
+    const rx = c.x + 3;
+    const ry = c.y + CLUSTER_PAD + COUNTER_TOP - 6; // a few px above the counter top
+    const rw = c.w - 6;
+    const rh = c.y + c.h - ry - 3;
+    ctx.fillStyle = 'rgba(180,225,255,0.16)'; // translucent light-blue wash
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; // crisp white border
+    ctx.fillRect(rx, ry, rw, 1); ctx.fillRect(rx, ry + rh - 1, rw, 1);
+    ctx.fillRect(rx, ry, 1, rh); ctx.fillRect(rx + rw - 1, ry, 1, rh);
+  });
 }
 
 // --- floor: warm wood planks (modern / WeWork vibe) ---
@@ -950,13 +1042,14 @@ function drawBackWall() {
 
   // --- amenities standing on the wall/floor line (feet at WALL_H) ---
   // Left bay: the kitchenette stack (vending + water cooler) capped by a plant.
-  // Right bay: the printer + a plant. These sit in the bays the windows skip.
+  // Right bay: a desk monitor on a shelf + a plant. These sit in the bays the
+  // windows skip. (The "printer" sprite was actually monitorA — same rect.)
   const base = WALL_H - 2;
   let x = 6;
   x += blitStanding(ctx, 'vendDrink', x, base) + 2;
   x += blitStanding(ctx, 'vendSnack', x, base) + 4;
   if (bufW > 200) { x += blitStanding(ctx, 'waterCooler', x, base) + 4; blitStanding(ctx, 'plant', x, base); }
-  blitStanding(ctx, 'printer', bufW - 22, base);
+  blitStanding(ctx, 'monitorA', bufW - 22, base);
   blitStanding(ctx, 'plant', bufW - 42, base);
 }
 
@@ -1030,11 +1123,12 @@ function drawCollab(z) {
   ctx.fillRect(rx, ry, rw, rh);
   ctx.fillStyle = '#46606a'; ctx.fillRect(rx, ry, rw, 2); ctx.fillRect(rx, ry + rh - 2, rw, 2);
   ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(rx + 4, ry + 4, rw - 8, 1);
-  // the sheet bench-desk, scaled to roughly fill the rug width
-  const dw = sprW('deskBench'), dh = sprH('deskBench');
+  // the sheet counter-desk, roughly filling the rug width (was the bogus
+  // "deskBench" floor-tile; counterGray is the real desk surface)
+  const dw = sprW('counterGray'), dh = sprH('counterGray');
   const dx = Math.round(z.x + z.w / 2 - dw / 2);
   const dy = Math.round(floorY - dh + 2);
-  blit(ctx, 'deskBench', dx, dy);
+  blit(ctx, 'counterGray', dx, dy);
   // a couple of laptops / monitors sitting on the bench (procedural, tiny)
   ctx.fillStyle = '#1c2230'; ctx.fillRect(dx + 12, dy + 4, 8, 5);
   ctx.fillStyle = '#5cd0ff'; ctx.fillRect(dx + 13, dy + 5, 6, 3);
@@ -1101,22 +1195,25 @@ function drawGreenery(z) {
 }
 
 // Light sheet props on an occupied desk, varied by pod index so the floor isn't
-// uniform. A tray sits on the far-left corner (clear of the worker's left hand,
-// which is at px0+11) and a folder on the right-front corner (below the monitor
-// stand). Both rest their feet on the desk's front edge (deskTop+9) so they read
-// as sitting on the near lip of the desk. No-op until the sheet has loaded.
+// uniform. A paper in-tray sits on the far-left corner (clear of the worker's
+// left hand, at px0+11) and another in-tray on the right-front corner. Both rest
+// their feet on the desk's front edge (deskTop+9) so they read as sitting on the
+// near lip of the desk. No-op until the sheet has loaded.
 // ponytail: which desks get which prop is keyed off the index (a fixed pattern)
 // rather than the agent's seed — keeps it deterministic and easy for the PM to
 // eyeball; tune the cadence/placement if it reads too busy or too sparse.
+// (The right-corner prop used to be folder*[211,119/129/140], but those rects
+// are actually desk MONITORS — see office-atlas.js — so it now uses a real
+// in-tray instead of a stray tiny monitor.)
 function drawDeskProps(px0, py0, i) {
   if (!sheetReady()) return;
   const deskTop = py0 + 50;
   const lip = deskTop + 9; // feet rest on the desk's front edge band
   const trays = ['trayA', 'trayB'];
-  const folders = ['folderRed', 'folderBlue', 'folderGreen'];
-  // ~2/3 of desks carry a left tray; folders cycle so colors vary down the rows.
+  // ~2/3 of desks carry a left tray; the right corner gets the other tray style
+  // (offset index) so the two corners don't read as identical twins.
   if (i % 3 !== 2) blitStanding(ctx, trays[i % trays.length], px0 + 2, lip);
-  if (i % 2 === 0) blitStanding(ctx, folders[i % folders.length], px0 + POD_W - 15, lip);
+  if (i % 2 === 0) blitStanding(ctx, trays[(i + 1) % trays.length], px0 + POD_W - 12, lip);
 }
 
 // Stage a character at a pod's desk. The procedural desk slab top is at py0+50;
@@ -1132,23 +1229,190 @@ function drawDeskProps(px0, py0, i) {
 // so they don't appear to float above the desk.
 const SEAT_DX = 22; // = worker centre-x (cx)
 const SEAT_BASELINE_ANIM = 58; // generated atlas: seat line just below the desk front edge
-const SEAT_BASELINE_STATIC = 62; // standing sheet worker: a hair lower so feet sit at the desk
+// Neighborhoods: the static worker STANDS behind the counter. Its feet land on
+// the floor low in the pod; the counter (drawn on top) hides everything below
+// COUNTER_TOP, leaving head + shoulders visible above the counter. Baseline set
+// so ~13px of worker (head+shoulders) clears the counter top.
+const STAND_BASELINE_STATIC = 60; // feet at py0+60 → head ~py0+37, clears COUNTER_TOP(50)
 function drawSeatedCharacter(px0, py0, char, a, i, clockMs) {
   const state = charStateFor(a);
   // per-agent phase so a row of typists doesn't keystroke in lockstep
   const phase = seedOf(a, i) % 17;
-  const baseline = char.kind === 'static' ? SEAT_BASELINE_STATIC : SEAT_BASELINE_ANIM;
+  const baseline = char.kind === 'static' ? STAND_BASELINE_STATIC : SEAT_BASELINE_ANIM;
   drawCharacterState(ctx, px0 + SEAT_DX, py0 + baseline, char, { state, clockMs, phase });
 }
 
 // Head-anchored badges (PM crown, selection plumbob, "needs you" bubble) are
-// positioned relative to the head top. The procedural worker's head sits at
-// py0+6; a seated character's head sits lower, so in hybrid we drop the badge
-// anchor by HYBRID_HEAD_DROP to keep the badge hugging the head rather than
-// floating in the gap above it.
-const HYBRID_HEAD_DROP = 18;
+// positioned relative to the head top. The standing worker's head sits ~py0+37,
+// so we drop the badge anchor by HYBRID_HEAD_DROP to hug it rather than float in
+// the gap above.
+const HYBRID_HEAD_DROP = 38;
 function badgeAnchorY(py0, hasChar) {
   return hasChar ? py0 + HYBRID_HEAD_DROP : py0;
+}
+
+// ---- hybrid SHEET workstation (real counter + monitor) ----------------------
+// Replaces the procedural desk/monitor in hybrid: a sheet counter the worker
+// stands behind, with the real monitorA combo (monitor+keyboard) on top, screen
+// tinted to the model tier (functional signal) and brightened/dimmed by activity.
+
+// Mix a hex color toward white(+)/black(-) by amt (0..1). For screen tint+activity.
+function mix(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const t = amt < 0 ? 0 : 255, k = Math.abs(amt);
+  r = Math.round(r + (t - r) * k); g = Math.round(g + (t - g) * k); b = Math.round(b + (t - b) * k);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
+// The model-tier screen color, adjusted by activity so active-vs-idle reads at
+// floor zoom: working = bright lit screen, shell = lit (terminal), idle = clearly
+// dark/off. Hue (tier) is preserved in every state; the status LED carries the
+// signal too.
+function screenTint(a) {
+  const base = colorFor(a.model).screen; // opus #ffd166 / sonnet #5cd0ff / haiku #6cff9a / codex #ff8a3d
+  const act = a.activity;
+  if (act === 'working') return mix(base, 0.25);   // bright, lit screen
+  if (act === 'shell') return mix(base, 0.1);      // lit (terminal)
+  return mix(base, -0.68);                          // idle: clearly dark/off
+}
+
+// Is the agent's screen "on" (lit content) right now? Drives a tiny on-pixel.
+function screenLit(a) {
+  return a.activity === 'working' || a.activity === 'shell';
+}
+
+// --- Neighborhoods counter desk (hybrid) -------------------------------------
+// One continuous grey COUNTER spans each pod; workers STAND behind it, the
+// counter front hides their legs. Built from the sheet counterGray top, tan leg
+// dividers between stations, a dark front edge, and a printer at the left end.
+const COUNTER_TOP = 50;   // py0 + this = counter top edge (matches the old deskTop)
+const COUNTER_FRONT_H = 4; // dark front-edge band height (hides standing legs)
+const LEG_COLOR = '#d6b46a';   // tan/yellow station leg-divider
+const LEG_SHADE = '#a8884a';
+const COUNTER_EDGE = '#3a4250'; // dark front edge
+
+// Counter SLAB + leg dividers for a whole cluster, drawn BEFORE the workers so
+// they stand behind it. (The dark front edge is a separate pass — drawCounterFront
+// — drawn AFTER the workers to occlude their legs.)
+function drawSheetCounter(c) {
+  if (!sheetReady()) return;
+  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2; // counter top y (aligns to per-slot deskTop)
+  const x0 = c.x + CLUSTER_PAD;
+  const span = c.count * POD_W;
+  const ch = sprH('counterGray');
+  // grey counter top: blit one counterGray per slot (79>64 so they overlap into
+  // a seamless continuous grey), clipped to the pod span.
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, top, span, ch + COUNTER_FRONT_H + 2); ctx.clip();
+  for (let k = 0; k < c.count; k++) blit(ctx, 'counterGray', x0 + k * POD_W, top);
+  ctx.restore();
+  // tan leg dividers: one at each station boundary + the two end caps.
+  for (let k = 0; k <= c.count; k++) {
+    const lx = x0 + k * POD_W - (k === c.count ? 2 : 0);
+    ctx.fillStyle = LEG_COLOR; ctx.fillRect(lx, top + 2, 2, ch + COUNTER_FRONT_H - 2);
+    ctx.fillStyle = LEG_SHADE; ctx.fillRect(lx + 1, top + 2, 1, ch + COUNTER_FRONT_H - 2);
+  }
+}
+
+// The dark counter front edge, drawn AFTER the workers so the edge occludes their
+// lower legs (selling "standing behind the counter"). (No left-end printer — the
+// pack has no printer sprite; what the atlas called "printer" is the real monitor.)
+function drawCounterFront(c) {
+  if (!sheetReady()) return;
+  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2;
+  const x0 = c.x + CLUSTER_PAD;
+  const span = c.count * POD_W;
+  const ch = sprH('counterGray');
+  ctx.fillStyle = COUNTER_EDGE;
+  ctx.fillRect(x0, top + ch, span, COUNTER_FRONT_H);
+}
+
+// The real monitor (monitorA = monitor+keyboard combo, side-view) sits ON the
+// counter in front of each worker, drawn AFTER the worker so it reads as nearer.
+// Its base rests on the counter surface; the worker's head + shoulders stay
+// visible above it — "someone at their workstation". The combo already includes
+// a keyboard, so no separate keyboard is drawn.
+const CX_OFF = 22; // worker centre-x within the pod (= SEAT_DX)
+function drawSheetDeskTop(px0, py0, a) {
+  if (!sheetReady()) return;
+  const counterTop = py0 + COUNTER_TOP; // top edge of the counter band
+  const cx = px0 + CX_OFF;
+  const mw = sprW('monitorA'), mh = sprH('monitorA');
+  // centred on the worker's station, base sitting on the counter surface; set a
+  // touch lower than the worker's face so head+shoulders stay clearly above it.
+  const mx = cx - Math.round(mw / 2);
+  const my = counterTop + 16 - mh; // base ~16px into the counter band (on the surface)
+  blitMonitor(ctx, mx, my, 1, screenTint(a));
+  // tiny "power on" highlight on the screen when lit (working/shell), so active
+  // reads at floor zoom even when the dim/bright delta is subtle.
+  if (screenLit(a)) {
+    const s = MONITOR_SCREEN;
+    ctx.fillStyle = mix(colorFor(a.model).screen, 0.55);
+    ctx.fillRect(mx + s.x, my + s.y, 2, 2);
+  }
+}
+
+// One agent's pod in the DEFAULT (non-hybrid) renderer — the original procedural
+// worker + procedural desk/monitor + props + badges. Unchanged behaviour.
+function drawProceduralPod(i) {
+  const o = podOrigin(i);
+  const a = agents[i];
+  if (!a) { drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 }); return; }
+  const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
+  drawWorker(ctx, o.x, o.y, {
+    skin: a.skin, hair: a.hair, shirt, model: a.model,
+    activity: a.activity || 'idle', state: a.state,
+    subagents: a.subagents || [], frame, seed: seedOf(a, i),
+  });
+  drawDeskProps(o.x, o.y, i);
+  if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, o.y, frame);
+  if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, o.y, frame);
+}
+
+// The HYBRID "Neighborhoods" floor, drawn in z-order PASSES so a row of workers
+// reads as standing behind one shared counter:
+//   1. worker BODIES (bodyless workstation: just the sprite character + LED + minions)
+//   2. the COUNTER per cluster (top + leg dividers) — covers each worker's lower body
+//   3. the counter FRONT edge + left printer (occludes legs) + per-worker monitor/keyboard
+//   4. head badges (crown / needs-you) hugging the standing heads
+function drawHybridFloor(slots) {
+  // pass 1: worker bodies
+  for (let i = 0; i < slots; i++) {
+    const o = podOrigin(i);
+    const a = agents[i];
+    // vacant slot: skip the procedural desk/chair (the counter pass covers this
+    // station); just leave the spot empty behind the counter.
+    if (!a) { drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99, noChair: true, noDeskMonitor: true }); continue; }
+    const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
+    const char = characterFor(a, i);
+    drawWorker(ctx, o.x, o.y, {
+      skin: a.skin, hair: a.hair, shirt, model: a.model,
+      activity: a.activity || 'idle', state: a.state,
+      subagents: a.subagents || [], frame, seed: seedOf(a, i),
+      bodyless: !!char, noChair: true, noDeskMonitor: true,
+    });
+    if (char) drawSeatedCharacter(o.x, o.y, char, a, i, frame * 130);
+  }
+  // pass 2: the counter slab + leg dividers (behind the front edge, over the legs)
+  clusters.forEach((c) => drawSheetCounter(c));
+  // pass 3: counter front edge + printer, then per-worker monitor + keyboard
+  clusters.forEach((c) => drawCounterFront(c));
+  for (let i = 0; i < slots; i++) {
+    const a = agents[i];
+    if (!a) continue;
+    const o = podOrigin(i);
+    drawSheetDeskTop(o.x, o.y, a);
+  }
+  // pass 4: head badges
+  for (let i = 0; i < slots; i++) {
+    const a = agents[i];
+    if (!a) continue;
+    const o = podOrigin(i);
+    const badgeY = badgeAnchorY(o.y, !!characterFor(a, i));
+    if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, badgeY, frame);
+    if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, badgeY, frame);
+  }
 }
 
 function loop(t) {
@@ -1157,46 +1421,8 @@ function loop(t) {
     drawRoom();
 
     const slots = totalSlots();
-    for (let i = 0; i < slots; i++) {
-      const o = podOrigin(i);
-      const a = agents[i];
-      if (a) {
-        // background teammates wear their team color; everyone else keeps their
-        // roster shirt.
-        const shirt = (a.role === 'teammate' && teamColorHex(a.teamColor)) || a.shirt;
-        // In hybrid mode, draw a sprite character in the seat; the workstation
-        // (chair/desk/monitor/LED/minions) is still drawn by sprites.js but
-        // BODYLESS. Falls back to the full procedural worker if no character is
-        // available. Animated characters are SEATED sprites that bring their own
-        // chair, so suppress the procedural chair for them (noChair) to avoid a
-        // double chair; static standing sheet workers keep the procedural chair.
-        const char = HYBRID ? characterFor(a, i) : null;
-        drawWorker(ctx, o.x, o.y, {
-          skin: a.skin,
-          hair: a.hair,
-          shirt,
-          model: a.model,
-          activity: a.activity || 'idle',
-          state: a.state,
-          subagents: a.subagents || [],
-          frame,
-          seed: seedOf(a, i),
-          bodyless: !!char,
-          noChair: !!char && char.kind === 'animated',
-        });
-        if (char) drawSeatedCharacter(o.x, o.y, char, a, i, t);
-        drawDeskProps(o.x, o.y, i); // sheet props on the front lip of busy desks
-        const badgeY = badgeAnchorY(o.y, !!char); // hug the seated character's head in hybrid
-        if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, badgeY, frame); // PM crown
-        // "needs you" bubble for any agent blocked on the user's reply (Control
-        // Phase-1 sets awaitingReply). Floats at the head's upper-right, clear of
-        // the crown / selection plumbob which sit centred above the head.
-        if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, badgeY, frame);
-      } else {
-        // vacant desk (only appears if a slot ever outlives its agent)
-        drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
-      }
-    }
+    if (HYBRID) drawHybridFloor(slots);
+    else for (let i = 0; i < slots; i++) drawProceduralPod(i);
 
     // hover / selection highlights, painted over the workers
     if (hoverIdx >= 0 && hoverIdx !== selIdx && agents[hoverIdx]) {

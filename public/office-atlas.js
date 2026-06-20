@@ -22,15 +22,20 @@ export const SPR = {
   whiteboard: [84, 70, 26, 20],
   windowTall: [98, 120, 16, 31],
   windowWide: [59, 96, 26, 21],
-  printer: [233, 106, 15, 19],
+  // (the old "printer" [233,106,15,19] was the same rect as the real monitorA —
+  //  see the desk-monitor block below; the canonical name is monitorA.)
   clock: [159, 108, 19, 6],
   flagIN: [179, 94, 12, 9],
   flagUK: [193, 94, 12, 9],
   flagUS: [207, 94, 12, 9],
   picture: [239, 94, 11, 8],
   bulletin: [234, 81, 17, 11],
-  deskBlue: [3, 68, 73, 24],
-  counterGray: [171, 44, 79, 17],
+  // floorBlue: the blue brick FLOOR tile (was mislabeled "deskBlue"/"deskBench"
+  // and misused as a desk — it's a 73×24 floor-tile chunk: light-cyan top
+  // highlight, blue body, dark seams, staggered brick joints). Tiled across the
+  // floor in the Neighborhoods (hybrid) layout via drawBlueFloor() in render.js.
+  floorBlue: [3, 68, 73, 24],
+  counterGray: [171, 44, 79, 17], // grey-blue COUNTER desk top (real desk surface)
   cat: [65, 129, 16, 13],
   corgi: [59, 146, 24, 11],
 
@@ -38,10 +43,8 @@ export const SPR = {
   benchRed: [85, 47, 26, 16], // short red two-seat bench
   benchRedLong: [115, 47, 40, 16], // long red bench
   couchGrayWide: [119, 66, 33, 15], // blue-gray two-seat couch
-  // ponytail: the audit's "shredder" [188,63,17,19] is actually a chunk of the
-  // yellow whiteboard, not a shredder. The real standing white shredder/paper
-  // bin is the tall component at [240,128,6,19]; using that instead.
-  shredder: [240, 128, 6, 19],
+  // (removed the bogus "shredder" [240,128,6,19] — that rect is the real monitorB,
+  //  a side-view flatscreen; see the desk-monitor block below.)
 
   // --- WeWork redesign additions (verified via connected-component bbox pass) --
   // (Two-seat couches in blue/green/orange already exist above as couchBlue/
@@ -54,9 +57,8 @@ export const SPR = {
   chairBlue: [45, 41, 11, 22],
   chairWhite: [58, 41, 11, 22],
   chairGray: [71, 41, 11, 22],
-  // Long blue table-top (3 stacked bars, top-down) — the shared "hot-desk" bench
-  // a collab zone is built around. (Same rect as deskBlue; named for its new use.)
-  deskBench: [3, 68, 73, 24],
+  // (Removed the bogus "deskBench" alias — it pointed at the floorBlue tile, not
+  // a desk; the collab zone now builds its table from counterGray instead.)
   // Framed cream/tan art panels for the concrete feature wall (the WeWork art
   // wall). 17×19 each — two so the wall isn't a single repeat.
   artPanelA: [188, 63, 17, 19],
@@ -73,9 +75,25 @@ export const SPR = {
   // component is 6 wide, not 9; [200,107,9,9] is a tiny monitor, not a tray).
   trayA: [183, 107, 6, 8], // paper in-tray with a red folder tab
   trayB: [192, 107, 6, 9], // paper in-tray
-  folderRed: [211, 119, 11, 8], // upright file folder, red
-  folderBlue: [211, 129, 11, 8], // upright file folder, blue
-  folderGreen: [211, 140, 11, 8], // upright file folder, green
+
+  // BOOKS — colored book stacks (red/blue/green cover + white page edge + base).
+  // (Were repeatedly mislabeled "folderRed/Blue/Green" and then "monitorRed/…";
+  // user pixel-audit confirmed they are BOOKS, not monitors. Kept as desk decor.)
+  bookRed: [211, 119, 11, 8],
+  bookBlue: [211, 129, 11, 8],
+  bookGreen: [211, 140, 11, 8],
+
+  // --- desk MONITORS + keyboard (bottom-RIGHT of the sheet; user pixel-audit) ---
+  // The REAL monitors are SIDE-VIEW units (a 3/4-side perspective the pack mixes
+  // with its front-facing characters — accept it, don't "fix" it):
+  //   monitorA = a complete monitor+keyboard COMBO: tilted white screen, blue-gray
+  //     body, 3-button base, checkered keyboard at lower-left. (Atlas had this
+  //     mislabeled "copier"/"printer".) Tier color = tint its white screen region.
+  //   monitorB = a tall thin side-view flatscreen. (Was mislabeled "shredder".)
+  //   keyboard = the checkered side strip. (Checkerboards are keyboards, not shredders.)
+  monitorA: [233, 106, 15, 19],
+  monitorB: [240, 128, 6, 19],
+  keyboard: [233, 135, 5, 12],
 
   // --- standing worker characters (bottom-left of the sheet, by the cat/corgi) -
   // Five front-facing standing people, extracted via the same alpha-gutter
@@ -89,6 +107,16 @@ export const SPR = {
   worker3: [40, 107, 13, 21], // grey hair + glasses, white "C" tee (senior look)
   worker4: [3, 132, 17, 23],  // red hair, blue tee
   worker5: [22, 132, 17, 23], // dark hair, dark-red tee
+
+  // --- unmapped decor (verified real by zoom audit; not placed in the scene yet,
+  // available as possible floor decor later) -----------------------------------
+  computerTerminalGreen: [116, 143, 9, 14], // standing floor terminal, green
+  computerTerminalRed: [126, 143, 9, 14],   // standing floor terminal, red
+  computerTerminalBlue: [136, 143, 9, 14],  // standing floor terminal, blue
+  computerTerminalBlueBase: [147, 140, 9, 17], // blue terminal on a pedestal base
+  poleLamp: [207, 63, 4, 27], // thin standing pole/floor lamp
+  microwave: [169, 95, 8, 7], // small green-accented appliance (the not-a-mug from the prior audit)
+  applianceGray: [200, 107, 9, 9], // small grey appliance (printer/scanner-ish)
 };
 
 // Ordered list of the standing-worker SPR keys, for deterministic per-agent
@@ -111,4 +139,27 @@ export function blit(ctx, name, dx, dy, scale = 1) {
 // standing furniture against the back wall.
 export function blitStanding(ctx, name, dx, baselineY, scale = 1) {
   return blit(ctx, name, dx, baselineY - sprH(name, scale), scale);
+}
+
+// The white SCREEN region within monitorA, in LOCAL sprite pixels (the bright
+// 244-valued screen face; the checkered keyboard + base buttons are left alone).
+// Verified by pixel map: the screen is the 5×7 block at (6,1). We tint this whole
+// region so the model-tier colour gets the largest possible area on a 1x sprite.
+export const MONITOR_SCREEN = { x: 6, y: 1, w: 5, h: 7 };
+
+// Blit the real desk monitor (monitorA = monitor+keyboard combo) with its SCREEN
+// recolored to `screenColor` (the model-tier signal). `dx,dy` = top-left,
+// integer-scaled. Returns the drawn width (0 until the sheet has loaded).
+export function blitMonitor(ctx, dx, dy, scale, screenColor) {
+  if (!loaded) return 0;
+  blit(ctx, 'monitorA', dx, dy, scale); // monitor body + screen + keyboard + base
+  if (screenColor) {
+    const s = MONITOR_SCREEN;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = screenColor;
+    ctx.fillRect((dx + s.x * scale) | 0, (dy + s.y * scale) | 0, (s.w * scale) | 0, (s.h * scale) | 0);
+    ctx.imageSmoothingEnabled = prev;
+  }
+  return sprW('monitorA', scale);
 }
