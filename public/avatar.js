@@ -156,6 +156,10 @@ class Avatar {
   // Advance position from held keys, clamp to bounds, animate, and resolve the
   // nearest desk (firing agency:select on entering a new one).
   update(dtMs, { podPositions = [], bounds } = {}) {
+    // Disabled (toggled off / non-hybrid): do nothing — no movement, and crucially
+    // no _resolveNearest, so toggling off while standing on a desk doesn't re-latch
+    // and re-fire agency:select right after the enabled-setter already cleared it.
+    if (!this._enabled) return;
     const dt = Math.max(0, Math.min(dtMs || 0, 100)) / 1000; // clamp big tab-out gaps
 
     // Movement vector from held keys.
