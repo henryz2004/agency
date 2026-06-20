@@ -486,6 +486,7 @@ function syncLabels() {
 // drag) hit-tests the desk cells and dispatches the same `agency:select` event
 // the sheet renderer + chat panel already use.
 let world = null;
+let recenterBtn = null;           // shared #recenter button (CSS hides it until .show)
 const cam = { x: 0, y: 0, s: 1 }; // s multiplies the UPSCALE base
 let userMoved = false;            // once the user pans/zooms, stop auto-fitting
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -510,6 +511,9 @@ function applyCam() {
     labelWrap.style.transform = `scale(${eff})`;
   }
   if (world) world.style.transform = `translate(${Math.round(cam.x)}px, ${Math.round(cam.y)}px)`;
+  // CSS hides #recenter until .show; reveal it once the user has panned/zoomed
+  // (mirrors render.js), so the affordance isn't permanently invisible in proc mode.
+  if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
 }
 
 function clampPan() {
@@ -599,8 +603,8 @@ function attachInput() {
       userMoved = true; clampPan(); applyCam();
     }
   }, { passive: false });
-  const rc = document.getElementById('recenter');
-  if (rc) rc.addEventListener('click', () => { userMoved = false; fitView(); });
+  recenterBtn = document.getElementById('recenter');
+  if (recenterBtn) recenterBtn.addEventListener('click', () => { userMoved = false; fitView(); });
   window.addEventListener('resize', () => { if (!userMoved) fitView(); else { clampPan(); applyCam(); } });
 }
 
