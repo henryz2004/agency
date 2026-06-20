@@ -59,52 +59,40 @@ const SKINS = ['#f2cda4', '#e8b88a', '#d49a6a', '#b87a4e', '#a86a44', '#8a5a3c']
 const HAIRS = ['#2b2233', '#4a3326', '#6b4a2e', '#8a5a30', '#c98a3a', '#9a9aa6', '#1d1d24', '#5a2d2d'];
 const SHIRTS = ['#d9694f', '#5d9ce0', '#5dc98a', '#e0b05d', '#a87de0', '#5dc9c9', '#e07db0', '#c0584f', '#4f8fb0'];
 
-// ---- the back wall + sky ---------------------------------------------------
-// A warm sky band with chunky clouds, a textured plaster wall with a wood rail,
-// windows looking out on blue sky, a wall clock, framed pictures, and a glass
-// whiteboard — all procedural.
-export function drawSkyAndWall(ctx, bufW, skyH, wallH, frame) {
-  // --- sky gradient + clouds ---
-  const sky = ctx.createLinearGradient(0, 0, 0, skyH);
-  sky.addColorStop(0, '#5aa9e6');
-  sky.addColorStop(1, '#8fc8f0');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, bufW, skyH);
-  // chunky pixel clouds, deterministic positions, very slow drift
-  const drift = (frame * 0.15) % (bufW + 80);
-  for (let i = 0; i < Math.ceil(bufW / 110) + 1; i++) {
-    const baseX = i * 110 - 40;
-    const x = ((baseX - drift) % (bufW + 80) + (bufW + 80)) % (bufW + 80) - 40;
-    const y = 6 + (hashInt('cl' + i) % (skyH - 16));
-    drawCloud(ctx, x, y, 1 + (hashInt('cs' + i) % 2));
-  }
-
-  // --- plaster wall ---
-  const wy = skyH;
+// ---- the back wall ---------------------------------------------------------
+// A textured cream plaster wall (no sky — wall fills the whole band from the top
+// of the canvas) with a wood rail, windows looking out on blue sky, a wall clock,
+// framed pictures, and a glass whiteboard — all procedural.
+// `wallH` is the full wall band height (the floor begins at y = wallH).
+export function drawWall(ctx, bufW, wallH, frame) {
+  // --- plaster wall fills the band from the top ---
+  const wy = 0;
   ctx.fillStyle = '#efe6d4';
   ctx.fillRect(0, wy, bufW, wallH);
   // soft horizontal paneling lines (very faint) for texture
   ctx.fillStyle = 'rgba(150,120,80,0.05)';
-  for (let y = wy + 9; y < wy + wallH - 8; y += 9) ctx.fillRect(0, y, bufW, 1);
-  // top-of-wall ambient shade where it meets the sky
-  ctx.fillStyle = 'rgba(80,60,40,0.10)';
-  ctx.fillRect(0, wy, bufW, 2);
+  for (let y = wy + 12; y < wy + wallH - 8; y += 10) ctx.fillRect(0, y, bufW, 1);
+  // a subtle ceiling shade along the very top so the wall reads as receding
+  ctx.fillStyle = 'rgba(80,60,40,0.12)';
+  ctx.fillRect(0, wy, bufW, 3);
+  ctx.fillStyle = 'rgba(80,60,40,0.05)';
+  ctx.fillRect(0, wy + 3, bufW, 2);
 
   // --- wall hangings: clock, pictures, glass board, windows ---
   // windows tiled across, skipping a centre band for the clock/board
-  const winY = wy + 10, winW = 26, winH = 30;
+  const winY = wy + 14, winW = 26, winH = 32;
   for (let x = 40, k = 0; x < bufW - 40; x += 64, k++) {
     // leave a gap mid-wall for the clock + board
     if (x > bufW * 0.38 && x < bufW * 0.58) continue;
     drawWindow(ctx, x, winY, winW, winH, frame);
   }
   // wall clock high-centre
-  drawClock(ctx, Math.round(bufW * 0.46), wy + 14, frame);
+  drawClock(ctx, Math.round(bufW * 0.46), wy + 16, frame);
   // a framed landscape picture + a calendar near the left
-  drawPicture(ctx, 14, wy + 16);
-  drawCalendar(ctx, 34, wy + 16);
+  drawPicture(ctx, 14, wy + 20);
+  drawCalendar(ctx, 34, wy + 20);
   // a small green glass whiteboard centre-right
-  drawGlassBoard(ctx, Math.round(bufW * 0.5) + 8, wy + 12);
+  drawGlassBoard(ctx, Math.round(bufW * 0.5) + 8, wy + 16);
 
   // --- wood rail + baseboard at the bottom of the wall ---
   ctx.fillStyle = '#b07c44';
@@ -113,15 +101,6 @@ export function drawSkyAndWall(ctx, bufW, skyH, wallH, frame) {
   ctx.fillRect(0, wy + wallH - 7, bufW, 1); // rail highlight
   ctx.fillStyle = '#7d5630';
   ctx.fillRect(0, wy + wallH - 3, bufW, 3); // baseboard
-}
-
-function drawCloud(ctx, x, y, scale) {
-  const w = 18 * scale, h = 7 * scale;
-  px(ctx, x + 4, y + 2, w - 8, h - 2, '#ffffff');
-  px(ctx, x, y + 4, w, h - 4, '#ffffff');
-  px(ctx, x + 6, y, w - 12, 3, '#ffffff');
-  px(ctx, x, y + 4, w, 1, '#e6eef6'); // faint underside
-  px(ctx, x + 4, y + 2, w - 8, 1, '#ffffff');
 }
 
 function drawWindow(ctx, x, y, w, h, frame) {
@@ -309,39 +288,30 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
 }
 
-// ---- a cubicle workstation -------------------------------------------------
-// A grey cubicle cell with side dividers, a wood desk surface, a glowing
-// tier-colored monitor + keyboard, a country/flag pin on the divider, a desk
-// plant or mug, and the seated person. Everything procedural.
+// ---- a desk workstation ----------------------------------------------------
+// A clean open desk (NO enclosing cubicle frame): a wood desk surface, a glowing
+// tier-colored monitor + keyboard, a country/flag pin, a sticky-note cluster, a
+// desk plant or mug, and the seated person. Everything procedural. The desk sits
+// directly on its team rug (drawn by the office), reading like the reference
+// sheet office's open team pods rather than boxed cubicles.
 // (x, y) = top-left of the cell; CW/CH = cell size.
 export const CELL_W = 58;
 export const CELL_H = 78;
 const DESK_TOP = 52;   // desk surface y within the cell
-const DIV_W = 4;       // divider thickness
+const DIV_W = 4;       // legacy inset used to position desk props/flag
 
 export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
 
-  // --- cubicle shell: a soft grey back panel + raised side dividers ---
-  px(ctx, x, y, CELL_W, CELL_H, '#c3c8d2');               // back panel
-  px(ctx, x, y, CELL_W, 2, '#d6dae2');                    // top light
-  // dividers (left + right) — slightly darker, with a highlighted top edge
-  px(ctx, x, y, DIV_W, CELL_H, '#aab0bc');
-  px(ctx, x + CELL_W - DIV_W, y, DIV_W, CELL_H, '#aab0bc');
-  px(ctx, x, y, DIV_W, 2, '#c6cbd5');
-  px(ctx, x + CELL_W - DIV_W, y, DIV_W, 2, '#c6cbd5');
-  // subtle inner shadow at the panel base
-  px(ctx, x + DIV_W, y + CELL_H - 3, CELL_W - DIV_W * 2, 3, 'rgba(0,0,0,0.06)');
-
-  // --- a pinned flag / picture on the back panel (cozy personalization) ---
-  drawPin(ctx, x + DIV_W + 4, y + 5, seed);
-  // a sticky-note cluster on the other side
-  drawStickies(ctx, x + CELL_W - DIV_W - 14, y + 5, seed);
-
   // --- the seated worker (head clears the desk, body behind it) ---
   drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame });
+
+  // --- a pinned flag floating just above the monitor (cozy personalization) ---
+  drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
+  // a sticky-note cluster on the other shoulder
+  drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
 
   // --- wood desk surface across the cell ---
   const dx = x + DIV_W, dw = CELL_W - DIV_W * 2;

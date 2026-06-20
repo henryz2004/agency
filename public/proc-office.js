@@ -6,25 +6,33 @@
 import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
-  drawSkyAndWall, drawFloor, drawDaylight,
+  drawWall, drawFloor, drawDaylight,
   drawCubicle, drawCrown, CELL_W, CELL_H,
 } from './proc-sprites.js';
 
-const SKY_H = 40;
-const WALL_H = 64;
-const TOP = SKY_H + WALL_H;        // floor starts here
+const WALL_H = 70;                 // cream wall band; fills from the top of canvas
+const TOP = WALL_H;                // floor starts here (no sky)
 const MARGIN = 16;
 const CLUSTER_PAD = 6;             // inset around a cluster's cells
-const HEADER_H = 11;               // repo-label tab atop each cluster
+const HEADER_H = 14;               // repo-label clearance atop each cluster (DOM tab sits here)
 const GAP_X = 16;                  // gap between blocks on a row
 const GAP_Y = 20;                  // gap between rows
 const TILE_COLS = 3;               // max cubicles across per cluster
+const UPSCALE = 3;                 // canvas is CSS-scaled this much; the DOM label layer matches
 
 let canvas, ctx, bufW = 0, bufH = 0, frame = 0;
 let agents = [];
 let clusters = [];   // {x, y, w, h, count, firstAgent, project, seed}
 let decor = [];      // {type, x, y, w, h, seed}
 let cells = [];      // {x, y, agent} — flattened, in draw order
+
+// DOM overlay layer: real (crisp) HTML text for the name chips + repo labels,
+// instead of canvas pixel text. One wrapper div over the canvas, scaled by
+// UPSCALE so children are positioned in BUFFER coordinates (matching the canvas
+// art); a future camera can transform this one wrapper as a group.
+let labelWrap = null;        // the single group wrapper
+const nameNodes = [];        // pooled name-chip elements, reused between frames
+const repoNodes = [];        // pooled repo-label elements, reused between frames
 
 // ---- layout ----------------------------------------------------------------
 
@@ -357,7 +365,9 @@ const RUG_TONES = [
 function drawClusterRugs() {
   clusters.forEach((c) => {
     const tone = RUG_TONES[hashInt('rug' + c.seed) % RUG_TONES.length];
-    const rx = c.x - 4, ry = c.y + HEADER_H - 2, rw = c.w + 8, rh = c.h - HEADER_H + 6;
+    // Rug now starts near the top of the cluster (was below the header band) so
+    // it includes a top strip where the repo label is "sewn into" the carpet.
+    const rx = c.x - 4, ry = c.y + 2, rw = c.w + 8, rh = c.h + 2;
     px(ctx, rx, ry, rw, rh, tone.fill);
     px(ctx, rx, ry, rw, 2, tone.edge);
     px(ctx, rx, ry + rh - 2, rw, 2, tone.edge);
@@ -367,86 +377,249 @@ function drawClusterRugs() {
   });
 }
 
-// ---- cluster header label (repo tab) ----------------------------------------
-function drawClusterHeaders() {
-  for (const c of clusters) {
-    const label = c.project;
-    const tw = label.length * 4 + 8;
-    const lx = c.x + 4, ly = c.y + 2;
-    px(ctx, lx, ly, Math.min(tw, c.w - 8), HEADER_H - 3, '#243246');
-    px(ctx, lx, ly, Math.min(tw, c.w - 8), 1, '#3a526e');
-    drawTinyText(ctx, lx + 4, ly + 2, label.toUpperCase(), '#eaf2ff');
-  }
+// ---- DOM label overlay (real crisp text) ------------------------------------
+// Name chips + repo labels are HTML, not canvas pixels — the sheet office at
+// :4313 does the same (sharp DOM text scaled by the camera), which is far more
+// legible than any bitmap font at this buffer resolution. The wrapper is sized
+// in BUFFER coords and scaled by UPSCALE, so node positions reuse the same
+// cell/cluster coords the canvas art uses. Nodes are pooled and reused between
+// updates so nothing leaks. A future camera can transform `labelWrap` as a group.
+
+// Build (once) the group wrapper, parented to the canvas's container so it
+// overlays the canvas exactly. Inline styles only — we don't own index.html/css.
+function ensureLabelWrap() {
+  if (labelWrap || !canvas || !canvas.parentElement) return;
+  labelWrap = document.createElement('div');
+  labelWrap.className = 'proc-label-layer';
+  labelWrap.style.cssText =
+    'position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;z-index:5;';
+  canvas.parentElement.appendChild(labelWrap);
 }
 
-// A 3x5 pixel font for the repo labels + name tags — keeps text crisp at buffer
-// resolution rather than relying on the browser's antialiased canvas text.
-const FONT = {
-  A: ['010', '101', '111', '101', '101'], B: ['110', '101', '110', '101', '110'],
-  C: ['011', '100', '100', '100', '011'], D: ['110', '101', '101', '101', '110'],
-  E: ['111', '100', '110', '100', '111'], F: ['111', '100', '110', '100', '100'],
-  G: ['011', '100', '101', '101', '011'], H: ['101', '101', '111', '101', '101'],
-  I: ['111', '010', '010', '010', '111'], J: ['001', '001', '001', '101', '010'],
-  K: ['101', '110', '100', '110', '101'], L: ['100', '100', '100', '100', '111'],
-  M: ['101', '111', '111', '101', '101'], N: ['101', '111', '111', '111', '101'],
-  O: ['010', '101', '101', '101', '010'], P: ['110', '101', '110', '100', '100'],
-  Q: ['010', '101', '101', '110', '011'], R: ['110', '101', '110', '101', '101'],
-  S: ['011', '100', '010', '001', '110'], T: ['111', '010', '010', '010', '010'],
-  U: ['101', '101', '101', '101', '111'], V: ['101', '101', '101', '101', '010'],
-  W: ['101', '101', '111', '111', '101'], X: ['101', '101', '010', '101', '101'],
-  Y: ['101', '101', '010', '010', '010'], Z: ['111', '001', '010', '100', '111'],
-  '-': ['000', '000', '111', '000', '000'], ' ': ['000', '000', '000', '000', '000'],
-  '0': ['111', '101', '101', '101', '111'], '1': ['010', '110', '010', '010', '111'],
-  '2': ['110', '001', '010', '100', '111'], '3': ['110', '001', '010', '001', '110'],
-  '4': ['101', '101', '111', '001', '001'], '5': ['111', '100', '110', '001', '110'],
-  '6': ['011', '100', '110', '101', '010'], '7': ['111', '001', '010', '010', '010'],
-  '8': ['010', '101', '010', '101', '010'], '9': ['010', '101', '011', '001', '110'],
-};
-function drawTinyText(ctx, x, y, str, color) {
-  ctx.fillStyle = color;
-  let cx = x;
-  for (const ch of str) {
-    const g = FONT[ch] || FONT[' '];
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (g[r][c] === '1') ctx.fillRect(cx + c, y + r, 1, 1);
-    cx += 4;
-  }
+// A clean, LEGIBLE font (VT323 is the app's readable terminal face; ui-monospace
+// as the system fallback). Readability beats retro here.
+const NAME_FONT = "16px 'VT323', ui-monospace, monospace";
+const REPO_FONT = "14px 'VT323', ui-monospace, monospace";
+
+function statusColor(act) {
+  return act === 'working' ? '#39d98a' : act === 'shell' ? '#ffb454' : '#5a6478';
 }
 
-// Name tags under each cubicle (procedural pixel font so it scales crisply).
-function drawNameTags() {
-  for (const cell of cells) {
+// Position one name chip per agent (under its desk) and one repo label per
+// cluster (in the clearance band above the pod). Reuses pooled nodes; hides any
+// surplus from a previous, larger frame.
+function syncLabels() {
+  ensureLabelWrap();
+  if (!labelWrap) return;
+  // labelWrap's size + scale are owned by applyCam() (it scales with the camera,
+  // matching the canvas). Here we only (re)position the child labels in buffer coords.
+
+  // --- name chips (one per agent/cell) ---
+  cells.forEach((cell, i) => {
     const a = cell.agent;
-    const first = String(a.name).split(/\s+/)[0];
-    // tag = dark chip with a leading activity dot (green=working, amber=shell,
-    // grey=idle) then the name in the crisp pixel font.
-    const tw = first.length * 4 + 11; // name width + dot + paddings
-    const tx = Math.round(cell.x + CELL_W / 2 - tw / 2);
-    const ty = cell.y + CELL_H - 9;
-    px(ctx, tx, ty, tw, 8, 'rgba(20,28,42,0.9)');
-    px(ctx, tx, ty, tw, 1, 'rgba(255,255,255,0.2)');
-    const dot = a.activity === 'working' ? '#39d98a' : a.activity === 'shell' ? '#ffb454' : '#5a6478';
-    px(ctx, tx + 3, ty + 3, 2, 2, dot);
-    drawTinyText(ctx, tx + 7, ty + 2, first.toUpperCase(), '#eaf2ff');
+    const first = String(a.name || '').split(/\s+/)[0] || a.name || '—';
+    let el = nameNodes[i];
+    if (!el) {
+      el = document.createElement('div');
+      el.style.cssText =
+        'position:absolute;transform:translateX(-50%);display:inline-flex;' +
+        'align-items:center;gap:3px;max-width:62px;box-sizing:border-box;' +
+        'padding:0 4px 0 3px;height:11px;white-space:nowrap;' +
+        'background:rgba(14,20,32,0.92);border:1px solid rgba(255,255,255,0.18);' +
+        'border-radius:4px;line-height:1;';
+      const dot = document.createElement('span');
+      dot.dataset.role = 'dot';
+      dot.style.cssText = 'width:5px;height:5px;border-radius:50%;flex:0 0 auto;';
+      const name = document.createElement('span');
+      name.dataset.role = 'name';
+      name.style.cssText =
+        `font:${NAME_FONT};color:#eef3fb;line-height:1;` +
+        'overflow:hidden;text-overflow:ellipsis;';
+      el.appendChild(dot); el.appendChild(name);
+      labelWrap.appendChild(el);
+      nameNodes[i] = el;
+    }
+    el.style.display = 'inline-flex';
+    // pin the chip just under the desk content, centred on the cell
+    el.style.left = (cell.x + CELL_W / 2) + 'px';
+    el.style.top = (cell.y + CELL_H - 10) + 'px';
+    const dot = el.firstChild, name = el.lastChild;
+    const col = statusColor(a.activity);
+    dot.style.background = col;
+    dot.style.boxShadow = a.activity === 'idle' ? 'none' : `0 0 4px ${col}`;
+    name.textContent = first;
+  });
+  for (let i = cells.length; i < nameNodes.length; i++) nameNodes[i].style.display = 'none';
+
+  // --- repo labels (one per cluster) ---
+  clusters.forEach((c, i) => {
+    let el = repoNodes[i];
+    if (!el) {
+      el = document.createElement('div');
+      // "Sewn into the carpet": no chip background — cream thread-colored caps
+      // with an embossed/stitched shadow + wide letter-spacing, sitting on the
+      // rug's top strip so the team name reads as woven into the fabric.
+      el.style.cssText =
+        'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
+        "font:600 13px 'VT323', ui-monospace, monospace;letter-spacing:1.5px;" +
+        'color:#f3ead2;text-align:center;' +
+        'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
+        'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
+      labelWrap.appendChild(el);
+      repoNodes[i] = el;
+    }
+    el.style.display = 'block';
+    el.style.maxWidth = (c.w + 6) + 'px'; // full pod width before truncating
+    el.style.left = (c.x + c.w / 2) + 'px';
+    el.style.top = (c.y + 2) + 'px'; // on the rug's top strip
+    el.textContent = String(c.project || '').toUpperCase();
+  });
+  for (let i = clusters.length; i < repoNodes.length; i++) repoNodes[i].style.display = 'none';
+}
+
+// ---- camera: pan / zoom / click-to-select -----------------------------------
+// proc reuses the sheet office's existing `.world` wrapper (absolute, origin 0,0,
+// the canvas's parent). Pan = a translate on `.world` so the canvas AND the DOM
+// label group (both children of `.world`) move together. Zoom scales the canvas
+// crisply via CSS width (a transform-scale on the canvas would blur it, per
+// render.js) and the label group by a matching factor. A click (a press with no
+// drag) hit-tests the desk cells and dispatches the same `agency:select` event
+// the sheet renderer + chat panel already use.
+let world = null;
+const cam = { x: 0, y: 0, s: 1 }; // s multiplies the UPSCALE base
+let userMoved = false;            // once the user pans/zooms, stop auto-fitting
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function viewportRect() {
+  const host = world && world.parentElement; // .floor-frame
+  return host ? host.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+}
+
+function applyCam() {
+  if (!canvas) return;
+  const eff = UPSCALE * cam.s;
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
+  canvas.style.width = bufW * eff + 'px';   // crisp CSS-width zoom
+  canvas.style.height = bufH * eff + 'px';
+  if (labelWrap) {
+    labelWrap.style.width = bufW + 'px';
+    labelWrap.style.height = bufH + 'px';
+    labelWrap.style.transformOrigin = '0 0';
+    labelWrap.style.transform = `scale(${eff})`;
   }
+  if (world) world.style.transform = `translate(${Math.round(cam.x)}px, ${Math.round(cam.y)}px)`;
+}
+
+function clampPan() {
+  const vp = viewportRect();
+  const w = bufW * UPSCALE * cam.s, h = bufH * UPSCALE * cam.s;
+  const KEEP = 80; // always keep at least this much office on-screen
+  cam.x = clampN(cam.x, KEEP - w, vp.width - KEEP);
+  cam.y = clampN(cam.y, KEEP - h, vp.height - KEEP);
+}
+
+// Fit the whole office into the floor-frame, centered. Capped at the native 3x
+// so a small floor isn't over-magnified.
+function fitView() {
+  const vp = viewportRect();
+  const fitS = Math.min(vp.width / (bufW * UPSCALE), vp.height / (bufH * UPSCALE));
+  cam.s = clampN(fitS, 0.25, 1);
+  const eff = UPSCALE * cam.s;
+  cam.x = Math.max(0, Math.round((vp.width - bufW * eff) / 2));
+  cam.y = Math.max(0, Math.round((vp.height - bufH * eff) / 2));
+  applyCam();
+}
+
+function zoomAt(clientX, clientY, factor) {
+  const vp = viewportRect();
+  const pxp = clientX - vp.left, pyp = clientY - vp.top;
+  const eff0 = UPSCALE * cam.s;
+  const bx = (pxp - cam.x) / eff0, by = (pyp - cam.y) / eff0;
+  cam.s = clampN(cam.s * factor, 0.25, 3);
+  const eff1 = UPSCALE * cam.s;
+  cam.x = pxp - bx * eff1;
+  cam.y = pyp - by * eff1;
+  userMoved = true;
+  clampPan();
+  applyCam();
+}
+
+// Map a screen point to a desk cell's agent (or null). The canvas rect already
+// reflects the CSS scale + world translate, so dividing by the effective scale
+// gives buffer-space px.
+function agentAt(clientX, clientY) {
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  const eff = UPSCALE * cam.s;
+  const bx = (clientX - rect.left) / eff, by = (clientY - rect.top) / eff;
+  for (const cell of cells) {
+    if (bx >= cell.x && bx <= cell.x + CELL_W && by >= cell.y && by <= cell.y + CELL_H) {
+      return cell.agent;
+    }
+  }
+  return null;
+}
+
+// Attach pan/zoom/click once. A press that doesn't move is a click (select); a
+// press that drags pans the floor. Trackpad: two-finger scroll pans, pinch (⌘
+// /ctrl-wheel) zooms — matching the floor hint.
+function attachInput() {
+  if (!canvas || canvas.dataset.procInput) return;
+  canvas.dataset.procInput = '1';
+  let down = false, moved = 0, sx = 0, sy = 0;
+  canvas.style.cursor = 'grab';
+  canvas.addEventListener('mousedown', (e) => {
+    down = true; moved = 0; sx = e.clientX; sy = e.clientY;
+    canvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!down) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    moved += Math.abs(dx) + Math.abs(dy);
+    cam.x += dx; cam.y += dy; sx = e.clientX; sy = e.clientY;
+    userMoved = true; clampPan(); applyCam();
+  });
+  window.addEventListener('mouseup', (e) => {
+    if (!down) return;
+    down = false; canvas.style.cursor = 'grab';
+    if (moved < 5) {
+      const agent = agentAt(e.clientX, e.clientY);
+      window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: agent || null } }));
+    }
+  });
+  const host = (world && world.parentElement) || canvas;
+  host.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.ctrlKey) { // pinch / ⌘ → zoom around the cursor
+      zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.08 : 1 / 1.08);
+    } else { // plain scroll → pan
+      cam.x -= e.deltaX; cam.y -= e.deltaY;
+      userMoved = true; clampPan(); applyCam();
+    }
+  }, { passive: false });
+  const rc = document.getElementById('recenter');
+  if (rc) rc.addEventListener('click', () => { userMoved = false; fitView(); });
+  window.addEventListener('resize', () => { if (!userMoved) fitView(); else { clampPan(); applyCam(); } });
 }
 
 // ---- scene -----------------------------------------------------------------
 function draw() {
   ctx.clearRect(0, 0, bufW, bufH);
-  drawSkyAndWall(ctx, bufW, SKY_H, WALL_H, frame);
+  drawWall(ctx, bufW, WALL_H, frame);
   drawFloor(ctx, bufW, TOP, bufH);
   drawDaylight(ctx, bufW, TOP, bufH);
   drawCeilingLights();
   drawDecor();
   drawClusterRugs();
-  drawClusterHeaders();
-  // cubicles (cells already in row-major order, so later rows overlap earlier)
+  // cubicles (cells already in row-major order, so later rows overlap earlier).
+  // Names + repo labels are DOM (see syncLabels), positioned on each setAgents().
   for (const cell of cells) {
     const a = cell.agent;
     drawCubicle(ctx, cell.x, cell.y, a, frame, false, false);
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
   }
-  drawNameTags();
 }
 
 // ---- public API ------------------------------------------------------------
@@ -457,11 +630,19 @@ function draw() {
 // ponytail: no click-to-select in proc mode yet — agency:select is dispatched by
 // render.js on canvas clicks; add a hit-test here when proc graduates from flag.
 export function initOffice(canvasEl, _labels) {
+  // Only wire up canvas/ctx — DON'T paint anything yet. Painting an empty,
+  // furnished room before the first /api/state poll arrives caused a visible
+  // "load flash" (a fully-built office with zero agents flickering in before the
+  // real data). The animation loop starts on the first setAgents() call instead,
+  // so the first painted frame already reflects real agent data (or an
+  // intentionally-empty room when the poll genuinely reports zero agents).
+  // (_labels is the shared sheet-office #labels element; proc owns its own DOM
+  // label group instead — see ensureLabelWrap — so the two renderers don't clash.)
   canvas = canvasEl;
   ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
-  setAgents([]);
-  loop();
+  world = canvas.parentElement; // the .world wrapper (absolute, transform-origin 0,0)
+  attachInput();                // pan / zoom / click-to-open-chat
 }
 
 export function init(canvasEl, n, seed) {
@@ -469,31 +650,41 @@ export function init(canvasEl, n, seed) {
   ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   setAgents(makeAgents(n, seed));
-  loop();
 }
 
+let started = false;
 export function setAgents(next) {
   agents = next || [];
   plan();
   canvas.width = bufW;
   canvas.height = bufH;
-  canvas.style.width = bufW * 3 + 'px';   // 3x CSS upscale, crisp
-  canvas.style.height = bufH * 3 + 'px';
+  canvas.style.width = bufW * UPSCALE + 'px';   // crisp CSS upscale
+  canvas.style.height = bufH * UPSCALE + 'px';
   ctx.imageSmoothingEnabled = false;
   draw(); // repaint now — setting canvas.width cleared it; don't wait for the slow loop tick (avoids a blank frame each poll)
+  syncLabels(); // (re)position the DOM name + repo labels for the new layout
+  // Size/position the camera: fit-to-view until the user pans/zooms, then respect
+  // their view (just re-apply, since bufW/bufH may have changed with agent count).
+  if (!userMoved) fitView(); else applyCam();
+  if (!started) { started = true; loop(); } // first data → kick off the animation loop
 }
 
-let raf;
+let raf, timer;
 function loop() {
   frame++;
   draw();
-  raf = requestAnimationFrame(() => setTimeout(loop, 130)); // ~7.5fps pixel cadence
+  raf = requestAnimationFrame(() => {
+    if (!started) return;            // cancelled (reset) while the RAF was pending
+    timer = setTimeout(loop, 130);   // ~7.5fps pixel cadence
+  });
 }
 
 export function reset(n, seed) {
   cancelAnimationFrame(raf);
+  clearTimeout(timer);               // kill the tick the RAF may have already scheduled
+  started = false;                   // makes a pending RAF callback bail instead of rescheduling
+  userMoved = false;                 // re-fit the fresh layout
   setAgents(makeAgents(n, seed));
-  loop();
 }
 
 // expose for the harness
