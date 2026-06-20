@@ -1,0 +1,8 @@
+{
+  "name": "coffee",
+  "kind": "object",
+  "subject": "a small compact countertop single-serve coffee machine (pod/capsule style, NO glass carafe)",
+  "style_ref": "style_ref.png",
+  "anchor": { "ref": "vend_ref.png", "name": "tall drink vending machine", "sheet_h": 34, "pct": "35-45" },
+  "colors": 12
+}

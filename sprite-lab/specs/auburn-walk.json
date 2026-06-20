@@ -1,0 +1,11 @@
+{
+  "name": "auburn-walk",
+  "kind": "character",
+  "reference": "ref_char.png",
+  "frames": 4,
+  "action": "a side-view WALK CYCLE (contact, passing, contact, passing) of THIS SAME character",
+  "identity": "Keep her identity EXACTLY: long auburn hair, blue overalls, same face and chibi proportions.",
+  "target_h": 32,
+  "colors": 24,
+  "anims": { "walk": [0, 1, 2, 3] }
+}

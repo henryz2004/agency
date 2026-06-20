@@ -1,0 +1,10 @@
+{
+  "name": "worker-walk",
+  "kind": "character",
+  "frames": 4,
+  "action": "a side-view WALK CYCLE (contact, passing, contact, passing)",
+  "identity": "A small office worker: short dark hair, blue shirt, tan skin.",
+  "target_h": 32,
+  "colors": 16,
+  "anims": { "walk": [0, 1, 2, 3] }
+}
