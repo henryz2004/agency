@@ -5,11 +5,13 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getUsage } from './lib/usage.js';
 import { getLive } from './lib/live.js';
 import { identityFor } from './lib/roster.js';
 import { getTranscript } from './lib/transcript.js';
+import * as control from './lib/control.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -30,21 +32,30 @@ function buildState() {
   const usage = getUsage();
   const live = getLive();
 
+  // Which sessions are paused on a Stop hook, waiting for a reply (Control
+  // Phase-1). Folded onto matching live agents as awaitingReply / pendingSince
+  // so the frontend HUD + render.js "needs you" indicator can read it. The
+  // agent shape is otherwise unchanged.
+  const waiting = control.list();
+
   // Attach a stable identity to each live agent. In-process teammates keep
   // their team-config label + subagent_type as name/title (the roster still
   // supplies a stable avatar palette + hire date), so "cc-internals" reads as
   // itself rather than a roster-minted persona.
   const agents = live.agents.map((a) => {
     const ident = identityFor(a.sessionId, a.model, a.startedAt);
+    const w = a.sessionId ? waiting[a.sessionId] : null;
+    const ctrl = w ? { awaitingReply: true, pendingSince: w.since } : null;
     if (a.role === 'teammate') {
       return {
         ...a,
         ...ident,
+        ...ctrl,
         name: a.teammateName || ident.name,
         title: a.teammateType || ident.title,
       };
     }
-    return { ...a, ...ident };
+    return { ...a, ...ident, ...ctrl };
   });
 
   return {
@@ -84,6 +95,25 @@ function serveStatic(req, res) {
   });
 }
 
+// Open a new Terminal window running `claude --resume <id>` in the agent's cwd.
+// macOS-only (osascript → Terminal.app). ponytail: Terminal.app is hardcoded;
+// swap the AppleScript target if you live in iTerm. sessionId is charset-checked
+// by the caller and cwd is single-quoted, then both layers are escaped for the
+// AppleScript string so a weird path can't break out of it.
+function openResumeTerminal(sessionId, cwd, kind, cb) {
+  // A running BACKGROUND agent can't be `--resume`d (the CLI refuses — it's
+  // already live); you attach to it via the agent manager. Interactive sessions
+  // resume directly. ponytail: `claude agents` is a picker (no per-id attach in
+  // this CLI); --cwd scopes it to this project so the agent is easy to find.
+  const bg = kind === 'background' || kind === 'bg';
+  const inner = bg ? `claude agents --cwd ${shellQuote(cwd)}` : `claude --resume ${sessionId}`;
+  const shellCmd = `cd ${shellQuote(cwd)} && ${inner}`;
+  const appleScript = `tell application "Terminal"\nactivate\ndo script "${appleEscape(shellCmd)}"\nend tell`;
+  execFile('osascript', ['-e', appleScript], (err) => cb(err));
+}
+const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const appleEscape = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
 const server = http.createServer((req, res) => {
   try {
     const q = req.url.indexOf('?');
@@ -103,6 +133,155 @@ const server = http.createServer((req, res) => {
         return;
       }
       sendJSON(res, 200, getTranscript(sessionId, cwd));
+      return;
+    }
+    // ACTION endpoint (the one place Agency acts instead of viewing): open a
+    // terminal running `claude --resume <id>` in the agent's cwd. User-authorized;
+    // it spawns osascript→Terminal but never writes the ~/.claude data sources.
+    if (pathname === '/api/resume' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => {
+        body += c;
+        if (body.length > 4096) req.destroy(); // cap — these payloads are tiny
+      });
+      req.on('end', () => {
+        // This async handler fires after the top-level try/catch has returned, so
+        // guard it too — a throw here would otherwise crash the process (the app's
+        // fail-soft charter: a bad request must never take down the server).
+        try {
+          let sessionId, cwd, kind;
+          try {
+            ({ sessionId, cwd, kind } = JSON.parse(body || '{}'));
+          } catch {
+            return sendJSON(res, 400, { error: 'bad json' });
+          }
+          // Validate HARD before building any command: sessionId to a safe charset,
+          // cwd to an existing absolute path. (cwd is still shell-quoted below.)
+          if (!sessionId || !/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+            return sendJSON(res, 400, { error: 'invalid sessionId' });
+          }
+          if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.existsSync(cwd)) {
+            return sendJSON(res, 400, { error: 'invalid cwd' });
+          }
+          openResumeTerminal(sessionId, cwd, kind, (err) =>
+            err ? sendJSON(res, 500, { error: String(err.message || err) }) : sendJSON(res, 200, { ok: true })
+          );
+        } catch (err) {
+          sendJSON(res, 500, { error: String(err && err.message ? err.message : err) });
+        }
+      });
+      return;
+    }
+    // CONTROL endpoint — the Stop-hook landing pad. A Claude Code Stop hook of
+    // type "http" POSTs here and BLOCKS the agent until we respond; it FAILS
+    // OPEN (timeout / refused / non-2xx → agent just stops). We register the
+    // paused session and HOLD this response open: it's resolved either by
+    // /api/reply (→ decision:"block" JSON, resuming the agent with the user's
+    // instruction) or by the soft deadline (→ empty 200, agent stops normally,
+    // under the 120s hook timeout). Authorized control surface, like
+    // /api/resume — never writes the ~/.claude data sources.
+    if (pathname === '/api/hook/stop' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => {
+        body += c;
+        if (body.length > 64 * 1024) req.destroy(); // cap — hook payloads are small
+      });
+      req.on('end', () => {
+        // Fires after the top-level try/catch returns, so guard it too — a
+        // throw here would crash the process (fail-soft charter: a bad hook
+        // payload must never take down the server / /api/state).
+        try {
+          let info = {};
+          try {
+            info = JSON.parse(body || '{}') || {};
+          } catch {
+            // Malformed payload: fail open — let the agent stop normally.
+            return sendJSON(res, 200, {});
+          }
+          const sessionId = info.session_id;
+          // No usable session id: nothing to register against, fail open.
+          if (!sessionId || typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+            return sendJSON(res, 200, {});
+          }
+          let settled = false;
+          // settle(text): text → resume with the user's instruction; null →
+          // empty 200 so the agent stops. Idempotent (timeout vs reply vs close
+          // race) and returns true only if it actually wrote to a live socket,
+          // so control.resolve can tell a delivered reply from a dropped one.
+          const settle = (text) => {
+            if (settled) return false;
+            settled = true;
+            try {
+              if (typeof text === 'string') {
+                sendJSON(res, 200, {
+                  decision: 'block',
+                  reason: text,
+                  hookSpecificOutput: { hookEventName: 'Stop', additionalContext: text },
+                });
+              } else {
+                sendJSON(res, 200, {});
+              }
+              return true;
+            } catch {
+              return false; // connection already gone
+            }
+          };
+          // If the client hangs up while we hold (agent killed, hook timed out
+          // on its side), mark this hold settled AND drop the registry entry
+          // (entry-scoped, so a superseding hold survives) — otherwise the agent
+          // would keep showing awaitingReply and a late /api/reply would falsely
+          // report success on a dead socket.
+          res.on('close', () => {
+            settled = true;
+            control.cancel(sessionId, settle);
+          });
+          control.register(sessionId, {
+            cwd: info.cwd,
+            transcriptPath: info.transcript_path,
+            settle,
+          });
+        } catch (err) {
+          // Last-ditch: fail open so the agent stops rather than hanging.
+          try {
+            sendJSON(res, 200, {});
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+      return;
+    }
+    // CONTROL endpoint — deliver the user's typed reply to a paused agent.
+    // { sessionId, text }: resolves the matching held /api/hook/stop request
+    // (→ resumes the agent with `text`). 404 if no agent is pending for that id.
+    if (pathname === '/api/reply' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => {
+        body += c;
+        if (body.length > 16 * 1024) req.destroy(); // cap — text is capped to ~8KB below
+      });
+      req.on('end', () => {
+        try {
+          let sessionId, text;
+          try {
+            ({ sessionId, text } = JSON.parse(body || '{}'));
+          } catch {
+            return sendJSON(res, 400, { error: 'bad json' });
+          }
+          if (!sessionId || typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+            return sendJSON(res, 400, { error: 'invalid sessionId' });
+          }
+          if (typeof text !== 'string' || !text.trim()) {
+            return sendJSON(res, 400, { error: 'text is required' });
+          }
+          const reply = text.slice(0, 8 * 1024); // cap the instruction length
+          const delivered = control.resolve(sessionId, reply);
+          if (delivered) sendJSON(res, 200, { ok: true });
+          else sendJSON(res, 404, { error: 'no agent waiting for this session' });
+        } catch (err) {
+          sendJSON(res, 500, { error: String(err && err.message ? err.message : err) });
+        }
+      });
       return;
     }
     serveStatic(req, res);

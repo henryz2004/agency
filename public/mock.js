@@ -91,6 +91,13 @@ const cast = EMPTY
         // director-controlled, seeded so the first frame is already varied:
         activity: ['working', 'shell', 'idle'][i % 3],
         state: i === 5 ? 'done' : null,
+        // slot 1 is paused on a Stop hook, awaiting a reply — previews the
+        // Control Phase-1 reply box + "needs you" HUD with no real hook (?mock).
+        awaitingReply: i === 1,
+        pendingSince: i === 1 ? now0 - 45e3 : undefined,
+        pendingQuestion: i === 1
+          ? 'I\'ve finished the refactor. Should I also update the tests, or leave them for a follow-up?'
+          : undefined,
         // lead always shows 1-2 foreground minions; others occasionally do.
         subagents: isLead
           ? [{ type: 'general-purpose' }, { type: 'general-purpose' }]

@@ -440,6 +440,32 @@ export function drawLeadBadge(ctx, cx, podTopY, frame) {
   px(ctx, cx, y + 2, 1, 1, '#ff5cba'); // center gem
 }
 
+// "Needs you" indicator — a pulsing amber speech bubble with a "!" floating at
+// the agent's upper-right (clear of the crown/plumbob which sit centred above
+// the head), so an agent awaiting the user's reply (Control sets
+// agent.awaitingReply) reads as "blocked on you" across the floor.
+// cx = worker center x; podTopY = pod top in buffer coords.
+export function drawNeedsYou(ctx, cx, podTopY, frame) {
+  const bob = frame % 6 < 3 ? 0 : 1;
+  const bx = cx + 8; // offset right of the head
+  const y = podTopY - 6 - bob;
+  // soft pulsing halo behind the bubble
+  ctx.globalAlpha = frame % 8 < 4 ? 0.34 : 0.16;
+  px(ctx, bx - 2, y - 1, 16, 13, '#ffb454');
+  ctx.globalAlpha = 1;
+  // amber bubble body + a little tail pointing down toward the head
+  px(ctx, bx - 1, y, 12, 9, '#ffb454');
+  px(ctx, bx - 1, y, 12, 1, '#ffd793'); // top highlight
+  px(ctx, bx - 1, y + 8, 12, 1, '#e08a2a'); // bottom shade
+  px(ctx, bx - 2, y + 2, 1, 5, '#ffb454'); // left round
+  px(ctx, bx + 11, y + 2, 1, 5, '#e89030'); // right round
+  px(ctx, bx, y + 9, 3, 2, '#ffb454'); // tail toward the head
+  px(ctx, bx, y + 11, 1, 1, '#e08a2a');
+  // dark "!" glyph centred in the bubble
+  px(ctx, bx + 4, y + 2, 2, 4, '#3a2606');
+  px(ctx, bx + 4, y + 7, 2, 1, '#3a2606');
+}
+
 // A little bobbing green plumbob hovering above the selected worker's head.
 export function drawPlumbob(ctx, cx, podTopY, frame) {
   const bob = frame % 8 < 4 ? 0 : 1;

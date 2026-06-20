@@ -33,6 +33,49 @@ export const SPR = {
   counterGray: [171, 44, 79, 17],
   cat: [65, 129, 16, 13],
   corgi: [59, 146, 24, 11],
+
+  // --- lounge / lobby furniture (verified isolated components in the sheet) ---
+  benchRed: [85, 47, 26, 16], // short red two-seat bench
+  benchRedLong: [115, 47, 40, 16], // long red bench
+  couchGrayWide: [119, 66, 33, 15], // blue-gray two-seat couch
+  // ponytail: the audit's "shredder" [188,63,17,19] is actually a chunk of the
+  // yellow whiteboard, not a shredder. The real standing white shredder/paper
+  // bin is the tall component at [240,128,6,19]; using that instead.
+  shredder: [240, 128, 6, 19],
+
+  // --- WeWork redesign additions (verified via connected-component bbox pass) --
+  // (Two-seat couches in blue/green/orange already exist above as couchBlue/
+  //  couchGreen/couchOrange; the lounge zones rotate through those + couchGrayWide.)
+  // Side-view accent chairs (11×22) in six colors — pulled up to lounge tables
+  // and the collab bench for that scattered, organic café-seating look.
+  chairOrange: [6, 41, 11, 22],
+  chairYellow: [19, 41, 11, 22],
+  chairGreen: [32, 41, 11, 22],
+  chairBlue: [45, 41, 11, 22],
+  chairWhite: [58, 41, 11, 22],
+  chairGray: [71, 41, 11, 22],
+  // Long blue table-top (3 stacked bars, top-down) — the shared "hot-desk" bench
+  // a collab zone is built around. (Same rect as deskBlue; named for its new use.)
+  deskBench: [3, 68, 73, 24],
+  // Framed cream/tan art panels for the concrete feature wall (the WeWork art
+  // wall). 17×19 each — two so the wall isn't a single repeat.
+  artPanelA: [188, 63, 17, 19],
+  artPanelB: [213, 63, 17, 19],
+  // Clean two-tone glass marker board, 26×20. (Same rect as whiteboard above.)
+  glassBoard: [84, 70, 26, 20],
+  // Second floor-to-ceiling window style (a wider double-pane), 26×21.
+  windowWideB: [88, 96, 26, 21],
+
+  // --- desk props (small isolated components, sit on the desk surface) --------
+  // ponytail: the audit's "coffeeMug" [169,95,8,7] is a small green-striped
+  // appliance, not a clean mug — omitted; the procedural mug (drawDeskItem
+  // kind 1) is used for mugs instead. trayB corrected to 6px wide (the [192,...]
+  // component is 6 wide, not 9; [200,107,9,9] is a tiny monitor, not a tray).
+  trayA: [183, 107, 6, 8], // paper in-tray with a red folder tab
+  trayB: [192, 107, 6, 9], // paper in-tray
+  folderRed: [211, 119, 11, 8], // upright file folder, red
+  folderBlue: [211, 129, 11, 8], // upright file folder, blue
+  folderGreen: [211, 140, 11, 8], // upright file folder, green
 };
 
 export const sprW = (name, s = 1) => SPR[name][2] * s;

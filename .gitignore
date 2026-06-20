@@ -5,3 +5,6 @@ data/
 .DS_Store
 node_modules/
 *.log
+
+# claude code local state + nested agent worktrees (e.g. sprite-lab)
+.claude/

@@ -4,20 +4,37 @@
 // overlap. Full per-agent detail surfaces in a readable, screen-space info card
 // on hover / click.
 
-import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, colorFor, teamColorHex } from './sprites.js';
-import { sheetReady, blit, blitStanding, sprW } from './office-atlas.js';
+import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, drawNeedsYou, colorFor, teamColorHex } from './sprites.js';
+import { sheetReady, blit, blitStanding, sprW, sprH } from './office-atlas.js';
 
 const WALL_H = 72; // back-wall band: tall enough for standing furniture + windows
-const MARGIN = 14;
-const COL_GAP = 14; // horizontal breathing room between desks
+const MARGIN = 18; // outer breathing room around the whole floor
+const COL_GAP = 12; // horizontal gap between two desks in the same cluster
 const ROW_GAP = 34; // vertical band beneath each desk that holds its name tag
 const FIT_PAD = 28; // slack left around the office when fitting to the frame
 
+// --- cluster ("neighborhood") geometry ------------------------------------
+// Modern offices group 2–4 desks into small pods on a shared rug, with lounge
+// + greenery zones breathing between them — not one uniform spreadsheet grid.
+const CLUSTER_PAD = 12; // rug inset around a cluster's desks
+const ZONE_GAP_X = 30; // horizontal air between neighbouring blocks on a row
+const ZONE_GAP_Y = 26; // vertical air between rows of blocks
+const LOUNGE_W = 116; // footprint of a lounge zone (couch + table + chairs)
+const GREEN_W = 46; // footprint of a small greenery / plant cluster
+const COLLAB_W = 100; // footprint of a collab zone (shared sheet bench + chairs)
+
 let canvas, ctx, labelLayer, world, viewport, card, recenterBtn;
 let agents = [];
-let cols = 1, rows = 1, bufW = 0, bufH = 0;
+let bufW = 0, bufH = 0;
 let frame = 0;
 let reservedRight = 0; // px reserved on the right for the hovering panel
+
+// The floor plan, rebuilt each layout(): absolute pod positions (the public
+// podOrigin/podAt/totalSlots contract reads from these) + the decor blocks that
+// dress the room (lounges, greenery, feature wall) so the scene reflows by count.
+let podSlots = []; // [{x, y}] — one per agent, in buffer coords
+let decorZones = []; // [{type, x, y, w, h, seed}] — lounges / greenery to paint
+let clusters = []; // [{x, y, w, h, count, seed}] — desk neighbourhoods (for rugs)
 
 // ---- camera --------------------------------------------------------------
 // Pan = world translate(cam.x, cam.y); zoom = cam.s (applied to the canvas CSS
@@ -36,13 +53,12 @@ let pinchPrevDist = null;
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-// choose a pleasing column count for N desks
-function colsFor(n) {
-  if (n <= 1) return 1;
-  if (n <= 2) return 2;
-  if (n <= 6) return 3;
-  if (n <= 12) return 4;
-  return 5;
+// A tiny stable hash → small int, for deterministic-but-varied floor-plan choices.
+function hashInt(s) {
+  let h = 2166136261 >>> 0;
+  s = String(s);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
 }
 
 function fmtUptime(ms) {
@@ -113,15 +129,165 @@ function seedOf(a, i) {
 }
 
 // ---- layout + camera -----------------------------------------------------
+// Modern "neighborhood" floor plan instead of a uniform grid. We partition the
+// agents into small desk CLUSTERS (2–4 pods on a shared rug), then flow those
+// clusters together with LOUNGE and GREENERY zones into wrapping rows — leaving
+// asymmetric breathing room so the floor reads designed, not spreadsheet-y.
+//
+// The public contract is preserved: every agent i still gets an absolute origin
+// via podOrigin(i) (read from podSlots), is hit-tested by podAt, and counted by
+// totalSlots() — so selection, the DOM nameplates, the chat panel and the
+// awaitingReply indicator all keep working unchanged.
+
+// A cluster's footprint for `count` desks, laid out in up to 2 columns.
+function clusterDims(count) {
+  const ccols = count <= 1 ? 1 : 2;
+  const crows = Math.ceil(count / ccols);
+  return {
+    ccols, crows,
+    w: ccols * POD_W + (ccols - 1) * COL_GAP + CLUSTER_PAD * 2,
+    h: crows * POD_H + (crows - 1) * (ROW_GAP - 8) + ROW_GAP + CLUSTER_PAD,
+  };
+}
+
+// Partition n desks into cluster sizes (each 2–4). We favour pods of 3–4 with
+// the odd pair so neighbourhoods feel varied, never a lonely single desk and
+// never a cluster so big it grows three rows tall.
+function clusterSizes(n) {
+  if (n <= 0) return [];
+  if (n <= 4) return [n];
+  const sizes = [];
+  let left = n;
+  const pattern = [4, 3, 4, 2, 3, 4]; // deterministic rotation, max 4
+  let p = 0;
+  while (left > 0) {
+    let s = pattern[p % pattern.length];
+    p++;
+    if (left <= 4) { sizes.push(left); break; } // place the tail as one pod (2–4)
+    if (left - s === 1) s = 3; // don't strand a single; leave a pair-or-more tail
+    sizes.push(s);
+    left -= s;
+  }
+  return sizes;
+}
+
+// Build the whole floor plan: cluster + decor blocks flowed into rows, then
+// absolute pod positions. Width target adapts to the desk count so few agents
+// stay compact and many spread into a believable open-plan floor.
+function planFloor(n) {
+  podSlots = [];
+  decorZones = [];
+  clusters = [];
+
+  const sizes = clusterSizes(Math.max(n, 0));
+  // Empty floor (no live agents): still a furnished, lived-in lounge rather than
+  // a bare strip — a couch zone flanked by greenery reads as "quiet office".
+  if (sizes.length === 0) {
+    const blocks = [
+      { kind: 'green', w: GREEN_W, h: POD_H - 8, seed: 31 },
+      { kind: 'lounge', w: LOUNGE_W, h: POD_H + 6, seed: 47 },
+      { kind: 'green', w: GREEN_W, h: POD_H - 8, seed: 59 },
+    ];
+    let ex = MARGIN; const ey = WALL_H + MARGIN; let eh = 0;
+    blocks.forEach((b) => { decorZones.push({ type: b.kind, x: ex, y: ey, w: b.w, h: b.h, seed: b.seed }); ex += b.w + ZONE_GAP_X; eh = Math.max(eh, b.h); });
+    bufW = Math.round(ex - ZONE_GAP_X) + MARGIN;
+    bufH = ey + eh + MARGIN;
+    return;
+  }
+  // Assemble the running order of blocks for this floor: desk clusters, with a
+  // lounge or greenery zone sprinkled between every couple of clusters so the
+  // open plan has soft "social" interruptions like the reference.
+  const blocks = [];
+  // social-zone rotation woven between clusters: greenery (slim) most often, a
+  // lounge or a sheet-desk collab table at wider intervals so the floor has a
+  // mix of "social interruptions" without any two big zones crowding together.
+  const socialOrder = ['green', 'lounge', 'green', 'collab', 'green', 'lounge'];
+  let social = 0;
+  sizes.forEach((sz, ci) => {
+    const d = clusterDims(sz);
+    blocks.push({ kind: 'cluster', count: sz, w: d.w, h: d.h, dims: d, seed: 101 + ci * 7 });
+    if (ci < sizes.length - 1) { // never trail a social zone past the last cluster
+      const kind = socialOrder[social % socialOrder.length];
+      social++;
+      if (kind === 'lounge') blocks.push({ kind: 'lounge', w: LOUNGE_W, h: POD_H + 6, seed: 211 + ci * 13 });
+      else if (kind === 'collab') blocks.push({ kind: 'collab', w: COLLAB_W, h: POD_H, seed: 401 + ci * 13 });
+      else blocks.push({ kind: 'green', w: GREEN_W, h: POD_H - 8, seed: 307 + ci * 11 });
+    }
+  });
+
+  // Target a width that spreads clusters across the (wide) frame rather than
+  // stacking them into a tall column — an open-plan floor reads landscape. Aim
+  // for a roughly 7:4 aspect by widening as the desk count grows. The per-gap
+  // allowance is sized to the WIDEST social zone (a lounge) so an inter-cluster
+  // zone landing on a row never tips the next cluster over the edge.
+  const clusterBlocks = blocks.filter((b) => b.kind === 'cluster');
+  const nClusters = clusterBlocks.length;
+  const widest = clusterBlocks.reduce((m, b) => Math.max(m, b.w), POD_W + CLUSTER_PAD * 2);
+  const perRow = nClusters <= 1 ? 1
+    : nClusters <= 2 ? 2
+    : nClusters <= 6 ? 3
+    : 4;
+  const gapAllow = ZONE_GAP_X * 2 + LOUNGE_W; // room for a social zone between clusters
+  const targetW = MARGIN * 2 + widest * perRow + gapAllow * Math.max(0, perRow - 1);
+
+  // Greedy row-wrap: place blocks left→right until the next one would overflow
+  // targetW, then start a new row below the tallest block of the previous row.
+  // Alternating blocks in a row get a small vertical STAGGER so the floor breaks
+  // its horizon line and reads organic rather than as aligned spreadsheet rows.
+  const STAGGER = 16;
+  let cx = MARGIN, cy = WALL_H + MARGIN, rowH = 0, rowStart = 0, rowCol = 0;
+  const placed = [];
+  const finishRow = (endX) => {
+    // centre each finished row horizontally so the floor reads balanced, and
+    // stretch its decor zones to the row height so their furniture bottom-aligns
+    // with the desk clusters instead of floating up at the row's top.
+    const slack = (targetW - MARGIN - endX);
+    const rowBottom = cy + rowH;
+    for (let k = rowStart; k < placed.length; k++) {
+      if (slack > 1) placed[k].x += slack / 2;
+      // decor zones grow down to the row's floor so their furniture baseline
+      // (z.y + z.h - 4) sits level with the desk clusters of the same row.
+      if (placed[k].kind !== 'cluster') placed[k].h = rowBottom - placed[k].y;
+    }
+  };
+  blocks.forEach((b) => {
+    if (cx > MARGIN && cx + b.w > targetW - MARGIN) {
+      finishRow(cx - ZONE_GAP_X);
+      cx = MARGIN; cy += rowH + ZONE_GAP_Y; rowH = 0; rowStart = placed.length; rowCol = 0;
+    }
+    const stag = rowCol % 2 ? STAGGER : 0; // every other block nudged down
+    placed.push({ ...b, x: cx, y: cy + stag });
+    cx += b.w + ZONE_GAP_X; rowCol++;
+    rowH = Math.max(rowH, b.h + stag); // keep row tall enough for the nudged block
+  });
+  finishRow(cx - ZONE_GAP_X);
+
+  // Realise pod positions + decor records from the placed blocks.
+  placed.forEach((b) => {
+    if (b.kind === 'cluster') {
+      clusters.push({ x: b.x, y: b.y, w: b.w, h: b.h, count: b.count, seed: b.seed });
+      const { ccols } = b.dims;
+      for (let k = 0; k < b.count; k++) {
+        const c = k % ccols, r = Math.floor(k / ccols);
+        podSlots.push({
+          x: b.x + CLUSTER_PAD + c * (POD_W + COL_GAP),
+          y: b.y + CLUSTER_PAD + r * (POD_H + ROW_GAP - 8),
+        });
+      }
+    } else {
+      decorZones.push({ type: b.kind, x: b.x, y: b.y, w: b.w, h: b.h, seed: b.seed });
+    }
+  });
+
+  // Buffer bounds: encompass every pod + decor block, plus a margin.
+  let maxX = MARGIN, maxY = WALL_H + MARGIN;
+  placed.forEach((b) => { maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h); });
+  bufW = Math.max(targetW, Math.round(maxX) + MARGIN);
+  bufH = Math.round(maxY) + MARGIN;
+}
 
 function layout() {
-  const n = agents.length;
-  const gridSlots = Math.max(n, 4); // never show fewer than a small office
-  cols = colsFor(gridSlots);
-  rows = Math.ceil(gridSlots / cols);
-
-  bufW = MARGIN * 2 + cols * POD_W + (cols - 1) * COL_GAP;
-  bufH = WALL_H + MARGIN + rows * (POD_H + ROW_GAP) + MARGIN;
+  planFloor(agents.length);
 
   canvas.width = bufW; // backing store stays at buffer resolution
   canvas.height = bufH;
@@ -135,15 +301,10 @@ function layout() {
 }
 
 function podOrigin(i) {
-  const c = i % cols;
-  const r = Math.floor(i / cols);
-  return {
-    x: MARGIN + c * (POD_W + COL_GAP),
-    y: WALL_H + MARGIN + r * (POD_H + ROW_GAP),
-  };
+  return podSlots[i] || { x: MARGIN, y: WALL_H + MARGIN };
 }
 
-function totalSlots() { return rows * cols; }
+function totalSlots() { return podSlots.length; }
 
 // Compute the scale + offset that frames the whole office in the free area
 // (left of the panel). Updates fitScale (used for zoom clamps) and returns it.
@@ -365,6 +526,8 @@ function selectAt(clientX, clientY, force) {
     selIdx = -1; selKey = null;
   }
   showCardFor(hoverIdx >= 0 ? hoverIdx : selIdx);
+  // Notify the chat panel (decoupled via event so render.js owns no panel state).
+  window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: selIdx >= 0 ? agents[selIdx] : null } }));
 }
 
 // ---- in-world name tags --------------------------------------------------
@@ -576,80 +739,276 @@ function drawFloor() {
   }
 }
 
-// Furnished room from the CC0 PixelOffice sheet: blue-tile floor, light back
-// wall with tiled windows + wall decor, and a row of amenities (vending, water
-// cooler, plants, couch, printer) standing against the wall. Falls back to the
+// The modern open-plan room, drawn from the warm palette + the CC0 PixelOffice
+// sheet: a wood-plank floor, a concrete feature wall with framed art, floor-to-
+// ceiling windows, exposed-ceiling pipes + cylinder pendant lights pooling warm
+// light over each cluster, dusty-teal area rugs under the desk neighbourhoods,
+// and lounge / greenery zones that breathe between them. Falls back to the
 // procedural night office until the sheet finishes loading.
 function drawRoom() {
   if (!sheetReady()) { drawFloor(); drawWall(); return; }
 
-  // --- floor: bright blue tile w/ offset brick mortar (matches the pack) ---
-  ctx.fillStyle = '#3a9fe0';
+  drawWoodFloor();
+  drawClusterRugs();
+  drawDaylight();
+  drawBackWall();
+  drawCeiling();
+  drawDecorZones();
+}
+
+// --- floor: warm wood planks (modern / WeWork vibe) ---
+function drawWoodFloor() {
+  const plank = 13;
+  for (let y = WALL_H, row = 0; y < bufH; y += plank, row++) {
+    ctx.fillStyle = row % 2 ? '#bd9159' : '#b1854c'; // alternating board shade
+    ctx.fillRect(0, y, bufW, plank);
+    ctx.fillStyle = 'rgba(60,34,10,0.30)'; // seam between board rows
+    ctx.fillRect(0, y + plank - 1, bufW, 1);
+    ctx.fillStyle = 'rgba(60,34,10,0.18)'; // staggered board-end joints
+    for (let x = (row % 2 ? 0 : 40); x < bufW; x += 80) ctx.fillRect(x, y, 1, plank - 1);
+  }
+}
+
+// Muted area rug under each desk cluster — defines the neighbourhood and lets
+// the warm wood read as the "circulation" path around it. The rug tone rotates
+// across a small palette of muted dusty hues so adjacent neighbourhoods read as
+// distinct zones rather than one repeated tile.
+const RUG_TONES = [
+  { fill: '#46615f', edge: '#3a4f4e' }, // dusty teal
+  { fill: '#5a5168', edge: '#473f53' }, // muted plum
+  { fill: '#6b5642', edge: '#564536' }, // warm taupe
+  { fill: '#4a5a6e', edge: '#3c4a5b' }, // slate blue
+];
+function drawClusterRugs() {
+  clusters.forEach((c) => {
+    const rx = c.x + 4, ry = c.y + 4, rw = c.w - 8, rh = c.h - 8;
+    const tone = RUG_TONES[hashInt(c.seed) % RUG_TONES.length];
+    ctx.fillStyle = tone.fill;
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.fillStyle = tone.edge; // bound edge
+    ctx.fillRect(rx, ry, rw, 2); ctx.fillRect(rx, ry + rh - 2, rw, 2);
+    ctx.fillRect(rx, ry, 2, rh); ctx.fillRect(rx + rw - 2, ry, 2, rh);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'; // faint top sheen
+    ctx.fillRect(rx + 3, ry + 3, rw - 6, 1);
+    // a thin contrasting inner stripe so rugs read as "designed", not flat felt
+    ctx.fillStyle = 'rgba(255,240,208,0.06)';
+    ctx.fillRect(rx + 5, ry + 5, rw - 10, rh - 10);
+  });
+}
+
+// Soft daylight from the windows: warm wash up top fading to a far-corner shadow.
+function drawDaylight() {
+  const light = ctx.createLinearGradient(0, WALL_H, 0, bufH);
+  light.addColorStop(0, 'rgba(255,240,208,0.18)');
+  light.addColorStop(0.45, 'rgba(255,240,208,0.04)');
+  light.addColorStop(1, 'rgba(35,18,4,0.12)');
+  ctx.fillStyle = light;
   ctx.fillRect(0, WALL_H, bufW, bufH - WALL_H);
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
-  for (let y = WALL_H; y < bufH; y += 12) ctx.fillRect(0, y, bufW, 1);
-  ctx.fillStyle = 'rgba(0,0,0,0.12)';
-  for (let y = WALL_H; y < bufH; y += 12) {
-    const off = ((y / 12) | 0) % 2 ? 0 : 18;
-    for (let x = off; x < bufW; x += 36) ctx.fillRect(x, y, 1, 11);
+}
+
+// --- back wall: warm off-white, a concrete feature panel with framed art, a
+// run of floor-to-ceiling windows, plus the kitchenette + printer amenities. ---
+function drawBackWall() {
+  ctx.fillStyle = '#ece3d2';
+  ctx.fillRect(0, 0, bufW, WALL_H);
+  ctx.fillStyle = 'rgba(120,90,50,0.05)'; // faint paneling lines
+  for (let y = 10; y < WALL_H - 8; y += 10) ctx.fillRect(0, y, bufW, 1);
+
+  // a poured-concrete FEATURE panel, centre-ish, hung with framed art (the
+  // WeWork art wall). Sized to the room; skipped on very narrow floors.
+  let featL = -1, featR = -1;
+  if (bufW > 240) {
+    const fw = clamp(Math.round(bufW * 0.26), 70, 150);
+    featL = Math.round(bufW / 2 - fw / 2);
+    featR = featL + fw;
+    ctx.fillStyle = '#b9b2a6'; // concrete
+    ctx.fillRect(featL, 0, fw, WALL_H - 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(featL, 0, fw, 2);
+    ctx.fillStyle = 'rgba(60,50,40,0.10)'; // subtle form-tie speckle
+    for (let k = 0; k < fw; k += 18) { ctx.fillRect(featL + 6 + k, 14, 1, 1); ctx.fillRect(featL + 12 + k, 40, 1, 1); }
+    // two framed art panels from the sheet, centred on the concrete
+    const aw = sprW('artPanelA');
+    blit(ctx, 'artPanelA', Math.round(featL + fw / 2 - aw - 4), 22);
+    blit(ctx, 'artPanelB', Math.round(featL + fw / 2 + 4), 22);
   }
 
-  // --- back wall: light interior panel w/ baseboard ---
-  ctx.fillStyle = '#cdd3da';
-  ctx.fillRect(0, 0, bufW, WALL_H);
-  ctx.fillStyle = 'rgba(0,0,0,0.05)';
-  for (let y = 9; y < WALL_H - 6; y += 9) ctx.fillRect(0, y, bufW, 1);
-  ctx.fillStyle = '#aeb5bf';
+  // wood accent rail + baseboard run the full width, in front of everything
+  ctx.fillStyle = '#a9763f';
+  ctx.fillRect(0, WALL_H - 7, bufW, 4); // wood rail
+  ctx.fillStyle = '#7d5630';
   ctx.fillRect(0, WALL_H - 3, bufW, 3); // baseboard
 
-  // windows tiled along the upper wall to fill any width
-  const winStep = 46;
-  for (let x = 10; x + sprW('windowWide') < bufW - 6; x += winStep) {
-    blit(ctx, 'windowWide', x, 6);
+  // floor-to-ceiling windows tiled across the open wall, skipping the feature
+  // panel and the amenity bays so glass never overlaps a fixture.
+  const winStep = 30;
+  const styles = ['windowWide', 'windowWideB'];
+  const leftBay = 86; // reserve the left kitchenette bay
+  const rightBay = bufW - 50; // reserve the right printer bay
+  for (let x = leftBay, k = 0; x + sprW(styles[k % 2]) < rightBay; x += winStep, k++) {
+    const w = sprW(styles[k % 2]);
+    if (featL >= 0 && x + w > featL - 4 && x < featR + 4) { x = featR + 4 - winStep; continue; }
+    blit(ctx, styles[k % 2], x, 6);
   }
-  // a few wall hangings between the windows
-  blit(ctx, 'clock', Math.round(bufW / 2 - 9), 9);
-  if (bufW > 120) {
-    blit(ctx, 'flagUS', 30, 30);
-    blit(ctx, 'flagUK', 46, 30);
-    blit(ctx, 'picture', bufW - 26, 28);
-    blit(ctx, 'whiteboard', bufW - 64, 8);
+
+  // wall hangings: clock high on the left, a glass board + flags near the bays
+  blit(ctx, 'clock', 12, 10);
+  if (bufW > 150) {
+    blit(ctx, 'glassBoard', 50, 8);
+    blit(ctx, 'flagUS', bufW - 30, 8);
+    blit(ctx, 'flagUK', bufW - 44, 8);
   }
 
   // --- amenities standing on the wall/floor line (feet at WALL_H) ---
-  // Left bay: the "kitchenette" stack (vending + water cooler), capped by a
-  // shredder and a plant. Right bay: the printer + a plant. Center (wide rooms
-  // only): a small lounge so the floor reads lived-in rather than just desks.
-  const base = WALL_H + 1;
+  // Left bay: the kitchenette stack (vending + water cooler) capped by a plant.
+  // Right bay: the printer + a plant. These sit in the bays the windows skip.
+  const base = WALL_H - 2;
   let x = 6;
   x += blitStanding(ctx, 'vendDrink', x, base) + 2;
   x += blitStanding(ctx, 'vendSnack', x, base) + 4;
-  x += blitStanding(ctx, 'waterCooler', x, base) + 5;
-  x += blitStanding(ctx, 'shredder', x, base) + 6;
-  blitStanding(ctx, 'plant', x, base);
-  // right side: printer + a plant
+  if (bufW > 200) { x += blitStanding(ctx, 'waterCooler', x, base) + 4; blitStanding(ctx, 'plant', x, base); }
   blitStanding(ctx, 'printer', bufW - 22, base);
   blitStanding(ctx, 'plant', bufW - 42, base);
+}
 
-  // --- lounge / lobby cluster (needs room; tucked along the back wall line) ---
-  // ponytail: placed center-right at the wall line so it never sits under a desk
-  // pod (pods start a full MARGIN below WALL_H). On wide floors it's a couch +
-  // bench + plant; on medium floors just the wide couch. Skipped when narrow so
-  // it can't collide with the kitchenette/printer bays above.
-  if (bufW > 380) {
-    // roomiest floors: couch + plant + the long bench
-    let cxp = Math.round(bufW * 0.40);
-    cxp += blitStanding(ctx, 'couchGrayWide', cxp, base) + 4;
-    cxp += blitStanding(ctx, 'plant', cxp, base) + 5;
-    blitStanding(ctx, 'benchRedLong', cxp, base);
-  } else if (bufW > 320) {
-    let cxp = Math.round(bufW * 0.42);
-    cxp += blitStanding(ctx, 'couchGrayWide', cxp, base) + 4;
-    cxp += blitStanding(ctx, 'plant', cxp, base) + 5;
-    blitStanding(ctx, 'benchRed', cxp, base);
-  } else if (bufW > 220) {
-    blitStanding(ctx, 'couchGrayWide', Math.round(bufW * 0.46), base);
+// Exposed industrial ceiling: a red service pipe runs across the top of the
+// floor area and cylinder PENDANT LIGHTS hang from it on short cords over each
+// cluster + lounge, each dropping a soft warm pool of light onto the zone below
+// (the signature WeWork ceiling).
+function drawCeiling() {
+  // red service pipe just below the wall, with a parallel thinner conduit
+  const py = WALL_H + 4;
+  ctx.fillStyle = '#c0473a';
+  ctx.fillRect(0, py, bufW, 3);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(0, py, bufW, 1); // pipe sheen
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(0, py + 3, bufW, 1);
+  ctx.fillStyle = '#8f8a80'; // thin secondary conduit
+  ctx.fillRect(0, py + 6, bufW, 1);
+
+  // a pendant over each cluster centre + over each lounge zone; the bulb hangs
+  // just below the pipe on a short cord, and casts a wide pool onto the zone.
+  const anchors = [
+    ...clusters.map((c) => ({ cx: c.x + c.w / 2, poolY: c.y + c.h / 2, pool: c.w * 0.65, ph: c.h })),
+    ...decorZones.filter((z) => z.type === 'lounge').map((z) => ({ cx: z.x + z.w / 2, poolY: z.y + z.h * 0.6, pool: z.w * 0.6, ph: z.h })),
+  ];
+  for (const a of anchors) {
+    const cx = Math.round(a.cx);
+    // warm light pool centred on the zone beneath the lamp
+    const grad = ctx.createRadialGradient(cx, a.poolY, 2, cx, a.poolY, Math.max(28, a.pool));
+    grad.addColorStop(0, 'rgba(255,224,150,0.18)');
+    grad.addColorStop(0.7, 'rgba(255,224,150,0.05)');
+    grad.addColorStop(1, 'rgba(255,224,150,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - a.pool, a.poolY - a.ph / 2, a.pool * 2, a.ph);
+    // short cord + cylinder shade hanging from the pipe + a glowing underside
+    const sy = py + 7; // shade top, just under the conduit
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(cx, py + 2, 1, 5); // short cord
+    ctx.fillStyle = '#33373f';
+    ctx.fillRect(cx - 3, sy, 6, 6); // cylinder body
+    ctx.fillStyle = '#454b55';
+    ctx.fillRect(cx - 3, sy, 1, 6); // left edge light
+    ctx.fillStyle = '#1d2026';
+    ctx.fillRect(cx + 2, sy, 1, 6); // right edge shade
+    ctx.fillStyle = frame % 12 === 0 ? '#fff0c0' : '#ffe39a'; // bulb, faint flicker
+    ctx.fillRect(cx - 2, sy + 6, 4, 1);
+    ctx.fillStyle = 'rgba(255,227,154,0.5)';
+    ctx.fillRect(cx - 1, sy + 7, 2, 1);
   }
+}
+
+// Draw the social zones the planner sprinkled between clusters: a lounge (couch
+// + coffee table + accent chairs on a round rug) or a greenery cluster (planters).
+function drawDecorZones() {
+  for (const z of decorZones) {
+    if (z.type === 'lounge') drawLounge(z);
+    else if (z.type === 'collab') drawCollab(z);
+    else drawGreenery(z);
+  }
+}
+
+// A collab / hot-desk zone built around the sheet's blue bench-desk: a shared
+// table on a small rug with accent chairs pulled up on either side and a laptop
+// or two on top — the "grab a seat and pair" spot of an open-plan office. Uses
+// the sprite-sheet desk so the floor's desking isn't purely procedural.
+function drawCollab(z) {
+  const floorY = z.y + z.h - 6;
+  // a small cool-grey task rug to ground the table
+  const rx = z.x + 6, rw = z.w - 12, rh = 26, ry = floorY - rh + 4;
+  ctx.fillStyle = '#54707b'; // slate blue-grey, distinct from the teal desk rugs
+  ctx.fillRect(rx, ry, rw, rh);
+  ctx.fillStyle = '#46606a'; ctx.fillRect(rx, ry, rw, 2); ctx.fillRect(rx, ry + rh - 2, rw, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(rx + 4, ry + 4, rw - 8, 1);
+  // the sheet bench-desk, scaled to roughly fill the rug width
+  const dw = sprW('deskBench'), dh = sprH('deskBench');
+  const dx = Math.round(z.x + z.w / 2 - dw / 2);
+  const dy = Math.round(floorY - dh + 2);
+  blit(ctx, 'deskBench', dx, dy);
+  // a couple of laptops / monitors sitting on the bench (procedural, tiny)
+  ctx.fillStyle = '#1c2230'; ctx.fillRect(dx + 12, dy + 4, 8, 5);
+  ctx.fillStyle = '#5cd0ff'; ctx.fillRect(dx + 13, dy + 5, 6, 3);
+  ctx.fillStyle = '#1c2230'; ctx.fillRect(dx + dw - 22, dy + dh - 12, 8, 5);
+  ctx.fillStyle = '#ffd166'; ctx.fillRect(dx + dw - 21, dy + dh - 11, 6, 3);
+  // accent chairs pulled up to the long sides (seed picks the colours)
+  const chairs = ['chairBlue', 'chairGreen', 'chairOrange', 'chairYellow', 'chairWhite', 'chairGray'];
+  blitStanding(ctx, chairs[hashInt(z.seed) % chairs.length], dx - 9, floorY + 1);
+  blitStanding(ctx, chairs[hashInt(z.seed + 5) % chairs.length], dx + dw + 1, floorY + 1);
+}
+
+// A lounge cluster: a soft sand area rug with a two-seat couch on the left, a
+// low coffee table in front of it, an accent chair pulled up facing the table,
+// and a potted plant at the back — the WeWork central-lounge motif. Couch +
+// chair colour rotate by seed so adjacent lounges don't match.
+function drawLounge(z) {
+  const floorY = z.y + z.h - 4; // feet line for furniture
+  // soft sand area rug under the whole grouping (a quieter, warmer counterpoint
+  // to the desk clusters' teal). Rounded by trimming the corners.
+  const rx = z.x + 4, rw = z.w - 8, rh = 36, ry = floorY - rh + 4;
+  ctx.fillStyle = '#cda871';
+  ctx.fillRect(rx + 4, ry, rw - 8, rh);
+  ctx.fillRect(rx, ry + 4, rw, rh - 8);
+  ctx.fillStyle = '#bd965f'; // bound edge
+  ctx.fillRect(rx + 4, ry, rw - 8, 1); ctx.fillRect(rx + 4, ry + rh - 1, rw - 8, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; // faint inner ring
+  ctx.fillRect(rx + 10, ry + 6, rw - 20, 1);
+
+  const couches = ['couchBlue', 'couchGrayWide', 'couchGreen', 'couchOrange'];
+  const couch = couches[hashInt(z.seed) % couches.length];
+  const cw = sprW(couch);
+  // couch anchored toward the left of the rug
+  const couchX = Math.round(rx + 6);
+  blitStanding(ctx, couch, couchX, floorY);
+  // coffee table in front-right of the couch — a small wood slab w/ legs
+  const tx = Math.round(couchX + cw - 6), ty = floorY - 8;
+  ctx.fillStyle = '#8a5e34'; ctx.fillRect(tx, ty, 18, 5); // top slab
+  ctx.fillStyle = '#a5743f'; ctx.fillRect(tx, ty, 18, 1); // top highlight
+  ctx.fillStyle = '#5a3d22'; ctx.fillRect(tx + 1, ty + 5, 2, 3); ctx.fillRect(tx + 15, ty + 5, 2, 3); // legs
+  // a tiny accent on the table (a mug / small book) keyed off the seed
+  ctx.fillStyle = (hashInt(z.seed + 9) % 2) ? '#d8d2c8' : '#c0473a';
+  ctx.fillRect(tx + 6, ty - 2, 4, 2);
+  // accent chair on the far right, just past the table
+  const chairs = ['chairOrange', 'chairYellow', 'chairGreen', 'chairWhite', 'chairBlue'];
+  const chair = chairs[hashInt(z.seed + 3) % chairs.length];
+  blitStanding(ctx, chair, Math.round(tx + 20), floorY + 1);
+  // a plant standing at the back-left corner, behind the couch arm
+  blitStanding(ctx, 'plant', Math.round(rx + 1), floorY - 3);
+}
+
+// A greenery cluster: a low wood planter box with a couple of plants at
+// staggered depths — the open-plan "biophilic" filler the reference leans on.
+function drawGreenery(z) {
+  const floorY = z.y + z.h - 2;
+  const pw = sprW('plant');
+  // a long low wood planter box the plants rise out of
+  const bx = z.x + 2, bw = z.w - 4, by = floorY - 5;
+  ctx.fillStyle = '#6f4d2b'; ctx.fillRect(bx, by, bw, 6);
+  ctx.fillStyle = '#8a6238'; ctx.fillRect(bx, by, bw, 2); // lip
+  ctx.fillStyle = '#5a3d22'; ctx.fillRect(bx, by + 5, bw, 1); // base shadow
+  // two plants, the back one a touch higher so they layer
+  blitStanding(ctx, 'plant', Math.round(z.x + 1), floorY - 4);
+  blitStanding(ctx, 'plant', Math.round(z.x + z.w - pw - 1), floorY - 1);
 }
 
 // Light sheet props on an occupied desk, varied by pod index so the floor isn't
@@ -697,8 +1056,12 @@ function loop(t) {
         });
         drawDeskProps(o.x, o.y, i); // sheet props on the front lip of busy desks
         if (a.role === 'lead') drawLeadBadge(ctx, o.x + 22, o.y, frame); // PM crown
+        // "needs you" bubble for any agent blocked on the user's reply (Control
+        // Phase-1 sets awaitingReply). Floats at the head's upper-right, clear of
+        // the crown / selection plumbob which sit centred above the head.
+        if (a.awaitingReply) drawNeedsYou(ctx, o.x + 22, o.y, frame);
       } else {
-        // vacant desk
+        // vacant desk (only appears if a slot ever outlives its agent)
         drawWorker(ctx, o.x, o.y, { model: '', vacant: true, frame, seed: i + 99 });
       }
     }

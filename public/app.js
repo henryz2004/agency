@@ -100,12 +100,56 @@ function onState() {
   updateSound(workingCount);
   $('emptyBanner').classList.toggle('hidden', live.agents.length > 0);
 
+  // Control Phase-1 HUD: agents paused on a Stop hook, waiting on a reply.
+  renderWaiting(live.agents.filter((a) => a.awaitingReply));
+
   renderManpower();
   renderModels(usage);
   renderDepts(usage);
   renderDaily(usage);
   renderLedger(usage);
   renderTicker();
+}
+
+// ---- "needs you" HUD (Control Phase-1) ------------------------------------
+// A non-intrusive pill in the topbar showing how many agents are paused on a
+// Stop hook waiting for a reply. Clicking it selects the first waiter, which
+// opens the chat panel with the reply box (via the same agency:select event the
+// renderer uses). The on-canvas per-agent indicator lives in render.js; this is
+// just the at-a-glance count.
+let waitingPill = null;
+
+function ensureWaitingPill() {
+  if (waitingPill) return waitingPill;
+  const stats = document.querySelector('.topstats');
+  if (!stats) return null;
+  waitingPill = document.createElement('button');
+  waitingPill.type = 'button';
+  waitingPill.id = 'waitingPill';
+  waitingPill.className = 'waiting-pill hidden';
+  waitingPill.title = 'Agents paused, waiting for your reply — click to answer';
+  // Insert before the LIVE pill so it reads alongside the status chips.
+  const live = stats.querySelector('.live-pill');
+  if (live) stats.insertBefore(waitingPill, live);
+  else stats.appendChild(waitingPill);
+  return waitingPill;
+}
+
+function renderWaiting(waiters) {
+  const pill = ensureWaitingPill();
+  if (!pill) return;
+  const n = waiters.length;
+  if (!n) {
+    pill.classList.add('hidden');
+    return;
+  }
+  pill.classList.remove('hidden');
+  pill.textContent = `🔔 ${n} waiting on you`;
+  pill.onclick = () => {
+    // Jump straight into answering the first (oldest) waiter.
+    const first = waiters.slice().sort((a, b) => (a.pendingSince || 0) - (b.pendingSince || 0))[0];
+    if (first) window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: first } }));
+  };
 }
 
 // ---- manpower -------------------------------------------------------------

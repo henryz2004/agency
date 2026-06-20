@@ -218,6 +218,158 @@
   border-color: var(--green);
 }
 
+/* primary action: open a terminal + resume the session */
+.cp-open {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #2a1f05;
+  background: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+.cp-open:hover {
+  filter: brightness(1.1);
+}
+.cp-open:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* "needs you" HUD pill (Control Phase-1): a non-intrusive topbar chip counting
+   agents paused on a Stop hook. Lives here (not style.css) to keep the control
+   feature self-contained; reuses the shared :root tokens. */
+.waiting-pill {
+  font-family: var(--pixel);
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #2a1f05;
+  background: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 6px 11px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  animation: cp-pulse 1.6s ease-in-out infinite;
+}
+.waiting-pill:hover {
+  filter: brightness(1.1);
+}
+.waiting-pill.hidden {
+  display: none;
+}
+
+/* reply box (Control Phase-1): shown above the transcript when an agent is
+   paused on a Stop hook and awaiting a reply. */
+.cp-reply {
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  background: linear-gradient(180deg, #1a160b, #14110a);
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-reply-head {
+  font-size: 14px;
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  line-height: 1.3;
+}
+.cp-reply-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 6px var(--gold);
+  animation: cp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.cp-reply-q {
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 3px solid var(--line2);
+  padding-left: 8px;
+  max-height: 6.5em;
+  overflow-y: auto;
+}
+.cp-reply-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--term);
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--ink);
+  background: #0c1119;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 7px 9px;
+}
+.cp-reply-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.cp-reply-input:disabled {
+  opacity: 0.6;
+}
+.cp-reply-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cp-reply-status {
+  font-size: 14px;
+  color: var(--muted2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-reply-status.err {
+  color: var(--red, #e05d5d);
+}
+.cp-reply-send {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #2a1f05;
+  background: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  padding: 7px 11px;
+  cursor: pointer;
+}
+.cp-reply-send:hover {
+  filter: brightness(1.1);
+}
+.cp-reply-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cp-reply-sent {
+  font-size: 15px;
+  color: var(--green);
+  padding: 2px 0;
+}
+
 @media (max-width: 1000px) {
   .chat-panel {
     width: 92vw;
