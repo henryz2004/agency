@@ -175,6 +175,15 @@ function actionsFor(a, transcript) {
       ? `cd ${a.cwd} && claude agents --cwd ${a.cwd}`
       : (transcript && transcript.resumeCmd) || `cd ${a.cwd} && claude --resume ${a.sessionId}`;
   if (a.role !== 'teammate' && a.source === 'claude' && a.sessionId && a.cwd && resumeCmd) {
+    // Honest framing: a live background agent has no direct chat to open and no
+    // attach-by-id (the CLI only offers the `claude agents` picker). Interactive
+    // sessions resume straight into the conversation.
+    const note = document.createElement('div');
+    note.className = 'cp-action-note';
+    note.textContent = bg
+      ? "Background agent — can't open its chat directly. This opens the claude agents window so you can find it."
+      : 'Resume this session to read or message it.';
+    wrap.appendChild(note);
     const row = document.createElement('div');
     row.className = 'cp-action-row';
     const code = document.createElement('code');
@@ -182,7 +191,7 @@ function actionsFor(a, transcript) {
     code.textContent = resumeCmd;
     row.appendChild(code);
     row.appendChild(openTerminalButton(a));
-    row.appendChild(copyButton('copy', resumeCmd, 'Copy the resume command'));
+    row.appendChild(copyButton('copy', resumeCmd, 'Copy the command'));
     wrap.appendChild(row);
   }
 
