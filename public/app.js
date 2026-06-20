@@ -2,7 +2,7 @@
 // "manpower" translation + comparison panels. All manpower math is client-side
 // so the assumption sliders update everything instantly.
 
-import { initOffice, setAgents } from './render.js';
+import * as sheetOffice from './render.js';
 import { drawHead, colorFor } from './sprites.js';
 import { initSoundPref, toggleSound, updateSound } from './sound.js';
 import { initUI } from './ui.js';
@@ -10,6 +10,15 @@ import { mockEnabled, getMockState } from './mock.js';
 import { initChatPanel } from './chat-panel.js';
 
 const $ = (id) => document.getElementById(id);
+
+// Renderer is swappable: ?render=proc loads the fully-procedural office
+// (proc-office.js), anything else uses the default sheet office (render.js).
+// Both expose initOffice(canvas, labels) + setAgents(agents) over the same
+// /api/state agent shape, so the rest of app.js is render-mode-agnostic.
+const officeMod = new URLSearchParams(location.search).get('render') === 'proc'
+  ? await import('./proc-office.js')
+  : sheetOffice;
+const { initOffice, setAgents } = officeMod;
 
 const office = $('office');
 const labels = $('labels');

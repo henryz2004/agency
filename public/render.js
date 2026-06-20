@@ -633,6 +633,7 @@ function zoomAt(clientX, clientY, factor) {
 
 export function setReservedRight(px) {
   reservedRight = Math.max(0, px || 0);
+  if (!viewport) return; // office not initialized (e.g. ?render=proc uses a different renderer)
   if (!userMoved) fitView();
   else commit();
 }
