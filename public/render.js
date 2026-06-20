@@ -7,6 +7,7 @@
 import { POD_W, POD_H, drawWorker, drawSelectRing, drawPlumbob, drawLeadBadge, drawNeedsYou, colorFor, teamColorHex } from './sprites.js';
 import { sheetReady, blit, blitStanding, blitMonitor, MONITOR_SCREEN, sprW, sprH, WORKER_SPRITES } from './office-atlas.js';
 import { loadCharacter, staticCharacter, drawCharacterState } from './characters.js';
+import { createAvatar } from './avatar.js';
 
 // Hybrid render mode (?render=hybrid): keep the sprite-sheet ENVIRONMENT but
 // swap the procedural worker BODY for a sheet/character sprite. Default stays
@@ -71,6 +72,12 @@ let agents = [];
 let bufW = 0, bufH = 0;
 let frame = 0;
 let reservedRight = 0; // px reserved on the right for the hovering panel
+
+// User avatar (hybrid only): a walkable player the user drives with WASD/arrows
+// to inspect agents. render.js owns the camera, so it centres on the avatar when
+// enabled. `avatarLastT` drives the per-frame dt; toggled with the 'g' key.
+let avatar = null;
+let avatarLastT = 0;
 
 // The floor plan, rebuilt each layout(): absolute pod positions (the public
 // podOrigin/podAt/totalSlots contract reads from these) + the decor blocks that
@@ -137,10 +144,39 @@ export function initOffice(canvasEl, labelLayerEl) {
   if (recenterBtn) recenterBtn.addEventListener('click', () => fitView());
 
   setupInteractions();
-  if (HYBRID) loadCharacters(); // async; loop falls back to procedural until ready
+  if (HYBRID) {
+    loadCharacters(); // async; loop falls back to procedural until ready
+    // User avatar — hybrid only. Created disabled; the 'g' key (or the toggle
+    // button) turns it on, which also flips the camera into follow mode.
+    avatar = createAvatar({ enabled: false, start: { x: MARGIN + 30, y: WALL_H + 40 } });
+    setupAvatarToggle();
+  }
   window.addEventListener('resize', onResize);
   requestAnimationFrame(loop);
   setInterval(tickUptimes, 1000);
+}
+
+// 'g' toggles the walkable avatar (and a small on-screen button if present).
+// While the avatar is enabled the camera follows it; disabling restores the
+// free pan/zoom camera and re-fits.
+function setupAvatarToggle() {
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'g' && e.key !== 'G') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    toggleAvatar();
+  });
+  const btn = document.getElementById('walk-toggle');
+  if (btn) btn.addEventListener('click', toggleAvatar);
+}
+
+function toggleAvatar() {
+  if (!avatar) return;
+  avatar.enabled = !avatar.enabled;
+  const btn = document.getElementById('walk-toggle');
+  if (btn) btn.classList.toggle('on', avatar.enabled);
+  if (avatar.enabled) { userMoved = true; centerOnAvatar(); }
+  else fitView(); // back to the framed free camera
 }
 
 export function setAgents(next) {
@@ -346,8 +382,15 @@ function planFloor(n) {
   sizes.forEach((sz, ci) => {
     const d = HYBRID ? clusterDimsRow(sz) : clusterDims(sz);
     blocks.push({ kind: 'cluster', count: sz, w: d.w, h: d.h, dims: d, seed: 101 + ci * 7 });
-    if (ci < sizes.length - 1) { // never trail a social zone past the last cluster
-      const kind = socialOrder[social % socialOrder.length];
+    // Neighborhoods pods are wide single-row counters, so weaving a social zone
+    // between EVERY pod spreads the floor thin — in hybrid only sprinkle one every
+    // few pods (and skip the chunky lounge in favour of slim greenery) so team
+    // rugs pack closer. Default keeps a zone between every cluster.
+    const sprinkle = HYBRID ? (ci % 3 === 2) : true;
+    if (ci < sizes.length - 1 && sprinkle) { // never trail a social zone past the last cluster
+      // Hybrid only ever uses slim GREENERY between pods (matches the tight
+      // gapAllow); default rotates greenery / lounge / collab for variety.
+      const kind = HYBRID ? 'green' : socialOrder[social % socialOrder.length];
       social++;
       if (kind === 'lounge') blocks.push({ kind: 'lounge', w: LOUNGE_W, h: POD_H + 6, seed: 211 + ci * 13 });
       else if (kind === 'collab') blocks.push({ kind: 'collab', w: COLLAB_W, h: POD_H, seed: 401 + ci * 13 });
@@ -363,11 +406,13 @@ function planFloor(n) {
   const clusterBlocks = blocks.filter((b) => b.kind === 'cluster');
   const nClusters = clusterBlocks.length;
   const widest = clusterBlocks.reduce((m, b) => Math.max(m, b.w), POD_W + CLUSTER_PAD * 2);
-  const perRow = nClusters <= 1 ? 1
-    : nClusters <= 2 ? 2
-    : nClusters <= 6 ? 3
-    : 4;
-  const gapAllow = ZONE_GAP_X * 2 + LOUNGE_W; // room for a social zone between clusters
+  // Hybrid pods are wide single-row counters → fit fewer per row and pack tighter
+  // (a slim greenery gap, not a lounge's worth of slack) so the floor doesn't read
+  // empty. Default keeps the original 2-col-cluster spacing.
+  const perRow = HYBRID
+    ? (nClusters <= 1 ? 1 : nClusters <= 4 ? 2 : 3)
+    : (nClusters <= 1 ? 1 : nClusters <= 2 ? 2 : nClusters <= 6 ? 3 : 4);
+  const gapAllow = HYBRID ? ZONE_GAP_X + GREEN_W : ZONE_GAP_X * 2 + LOUNGE_W;
   const targetW = MARGIN * 2 + widest * perRow + gapAllow * Math.max(0, perRow - 1);
 
   // Greedy row-wrap: place blocks left→right until the next one would overflow
@@ -405,7 +450,10 @@ function planFloor(n) {
   // Realise pod positions + decor records from the placed blocks.
   placed.forEach((b) => {
     if (b.kind === 'cluster') {
-      clusters.push({ x: b.x, y: b.y, w: b.w, h: b.h, count: b.count, seed: b.seed });
+      // firstAgent = index of this cluster's first agent in the (project-sorted)
+      // agents[] — equals podSlots.length before we push this cluster's slots, so
+      // the team-rug label can read the pod's project from agents[firstAgent].
+      clusters.push({ x: b.x, y: b.y, w: b.w, h: b.h, count: b.count, seed: b.seed, firstAgent: podSlots.length });
       const { ccols } = b.dims;
       for (let k = 0; k < b.count; k++) {
         if (HYBRID) {
@@ -504,6 +552,27 @@ function commit() {
   clampPan();
   applyCam();
   updateRecenter();
+  positionCard(cardIdx);
+}
+
+// Camera-follow for the avatar: keep the avatar's buffer position centred in the
+// free area (left of the panel), at a comfortable fixed zoom, gently lerped so
+// it glides rather than snaps. Clamped so the room edges don't pull off-screen.
+const AVATAR_ZOOM = 2.4; // a closer "walking" zoom than the framed fit
+function centerOnAvatar() {
+  if (!avatar) return;
+  const availW = Math.max(40, viewport.clientWidth - reservedRight);
+  const availH = Math.max(40, viewport.clientHeight);
+  const s = clamp(AVATAR_ZOOM, minScale(), maxScale());
+  const tx = availW / 2 - avatar.pos.x * s;
+  const ty = availH / 2 - avatar.pos.y * s;
+  // lerp toward the target for a smooth follow (snap on the first enable)
+  const k = cam.s === s ? 0.18 : 1;
+  cam.s = s;
+  cam.x += (tx - cam.x) * k;
+  cam.y += (ty - cam.y) * k;
+  clampPan();
+  applyCam();
   positionCard(cardIdx);
 }
 
@@ -706,6 +775,35 @@ function buildLabels() {
       `<span class="tag-name">${escapeHtml(first)}</span>` +
       leadTag +
       `<span class="tag-chip" style="background:${chip}"></span>`;
+    labelLayer.appendChild(el);
+  });
+  if (HYBRID) buildRugLabels();
+}
+
+// Per-rug PROJECT-NAME tag (hybrid neighborhoods): a small repo/team label pinned
+// at the top of each team rug, so you can read which project owns each pod — the
+// payoff of grouping co-located agents. One per cluster, the project read from
+// the cluster's first agent (all agents in a pod share a project).
+function buildRugLabels() {
+  clusters.forEach((c) => {
+    const a = agents[c.firstAgent];
+    const name = a && (a.project || a.cwd);
+    if (!name) return;
+    const short = String(name).replace(/^.*[\\/]/, ''); // basename of a cwd path
+    const el = document.createElement('div');
+    el.className = 'rug-tag';
+    el.textContent = short;
+    // styled inline (style.css isn't in this module's ownership): a small repo
+    // tab sitting in the open band ABOVE the workers' heads (the cluster top has
+    // ~CLUSTER_PAD of clearance before the standing heads), so it labels the team
+    // area without covering anyone. Scales with the label layer's camera transform.
+    el.style.cssText =
+      'position:absolute;white-space:nowrap;' +
+      'font:600 6px ui-monospace,monospace;letter-spacing:.2px;color:#eaf2ff;' +
+      'background:rgba(28,44,70,0.88);border:1px solid rgba(255,255,255,0.5);' +
+      'border-radius:3px;padding:1px 4px;pointer-events:none;';
+    el.style.left = `${c.x + 3}px`; // align to the rug's left border
+    el.style.top = `${c.y + 1}px`;  // in the clearance band above the heads
     labelLayer.appendChild(el);
   });
 }
@@ -1009,9 +1107,9 @@ function drawBackWall() {
     ctx.fillStyle = 'rgba(60,50,40,0.10)'; // subtle form-tie speckle
     for (let k = 0; k < fw; k += 18) { ctx.fillRect(featL + 6 + k, 14, 1, 1); ctx.fillRect(featL + 12 + k, 40, 1, 1); }
     // two framed art panels from the sheet, centred on the concrete
-    const aw = sprW('artPanelA');
-    blit(ctx, 'artPanelA', Math.round(featL + fw / 2 - aw - 4), 22);
-    blit(ctx, 'artPanelB', Math.round(featL + fw / 2 + 4), 22);
+    const aw = sprW('cubicleTableL');
+    blit(ctx, 'cubicleTableL', Math.round(featL + fw / 2 - aw - 4), 22);
+    blit(ctx, 'cubicleTableR', Math.round(featL + fw / 2 + 4), 22);
   }
 
   // wood accent rail + baseboard run the full width, in front of everything
@@ -1048,9 +1146,9 @@ function drawBackWall() {
   let x = 6;
   x += blitStanding(ctx, 'vendDrink', x, base) + 2;
   x += blitStanding(ctx, 'vendSnack', x, base) + 4;
-  if (bufW > 200) { x += blitStanding(ctx, 'waterCooler', x, base) + 4; blitStanding(ctx, 'plant', x, base); }
+  if (bufW > 200) { x += blitStanding(ctx, 'coffeeMachine', x, base) + 4; blitStanding(ctx, 'treePlant', x, base); }
   blitStanding(ctx, 'monitorA', bufW - 22, base);
-  blitStanding(ctx, 'plant', bufW - 42, base);
+  blitStanding(ctx, 'treePlant', bufW - 42, base);
 }
 
 // Exposed industrial ceiling: a red service pipe runs across the top of the
@@ -1176,22 +1274,22 @@ function drawLounge(z) {
   const chair = chairs[hashInt(z.seed + 3) % chairs.length];
   blitStanding(ctx, chair, Math.round(tx + 20), floorY + 1);
   // a plant standing at the back-left corner, behind the couch arm
-  blitStanding(ctx, 'plant', Math.round(rx + 1), floorY - 3);
+  blitStanding(ctx, 'treePlant', Math.round(rx + 1), floorY - 3);
 }
 
 // A greenery cluster: a low wood planter box with a couple of plants at
 // staggered depths — the open-plan "biophilic" filler the reference leans on.
 function drawGreenery(z) {
   const floorY = z.y + z.h - 2;
-  const pw = sprW('plant');
+  const pw = sprW('treePlant');
   // a long low wood planter box the plants rise out of
   const bx = z.x + 2, bw = z.w - 4, by = floorY - 5;
   ctx.fillStyle = '#6f4d2b'; ctx.fillRect(bx, by, bw, 6);
   ctx.fillStyle = '#8a6238'; ctx.fillRect(bx, by, bw, 2); // lip
   ctx.fillStyle = '#5a3d22'; ctx.fillRect(bx, by + 5, bw, 1); // base shadow
   // two plants, the back one a touch higher so they layer
-  blitStanding(ctx, 'plant', Math.round(z.x + 1), floorY - 4);
-  blitStanding(ctx, 'plant', Math.round(z.x + z.w - pw - 1), floorY - 1);
+  blitStanding(ctx, 'treePlant', Math.round(z.x + 1), floorY - 4);
+  blitStanding(ctx, 'treePlant', Math.round(z.x + z.w - pw - 1), floorY - 1);
 }
 
 // Light sheet props on an occupied desk, varied by pod index so the floor isn't
@@ -1245,8 +1343,9 @@ function drawSeatedCharacter(px0, py0, char, a, i, clockMs) {
 // Head-anchored badges (PM crown, selection plumbob, "needs you" bubble) are
 // positioned relative to the head top. The standing worker's head sits ~py0+37,
 // so we drop the badge anchor by HYBRID_HEAD_DROP to hug it rather than float in
-// the gap above.
-const HYBRID_HEAD_DROP = 38;
+// the gap above. (drawLeadBadge/drawPlumbob/drawNeedsYou draw at anchorY-8, so
+// at +43 the crown bottom lands ~2px above the head — snug, not floating.)
+const HYBRID_HEAD_DROP = 43;
 function badgeAnchorY(py0, hasChar) {
   return hasChar ? py0 + HYBRID_HEAD_DROP : py0;
 }
@@ -1292,24 +1391,38 @@ const LEG_COLOR = '#d6b46a';   // tan/yellow station leg-divider
 const LEG_SHADE = '#a8884a';
 const COUNTER_EDGE = '#3a4250'; // dark front edge
 
+// Shared counter geometry for a cluster: top-y, left-x, and a clean span. A
+// single-station pod would otherwise span only POD_W(64) — shorter than the
+// counterGray sprite (79) — and read as a stub; so a 1-wide counter gets a
+// proper-desk minimum width, centred under its worker (still inside the pod's
+// CLUSTER_PAD gutter, so it never collides with neighbours).
+const COUNTER_MIN_W = 76; // a lone desk reads full, not stubby
+function counterRect(c) {
+  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2; // aligns to per-slot deskTop
+  const slotsW = c.count * POD_W;
+  const span = Math.max(slotsW, COUNTER_MIN_W);
+  // centre the span over the worker slots (only widens a single pod into its pad)
+  const x0 = c.x + CLUSTER_PAD - Math.round((span - slotsW) / 2);
+  return { top, x0, span, ch: sprH('counterGray') };
+}
+
 // Counter SLAB + leg dividers for a whole cluster, drawn BEFORE the workers so
 // they stand behind it. (The dark front edge is a separate pass — drawCounterFront
 // — drawn AFTER the workers to occlude their legs.)
 function drawSheetCounter(c) {
   if (!sheetReady()) return;
-  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2; // counter top y (aligns to per-slot deskTop)
-  const x0 = c.x + CLUSTER_PAD;
-  const span = c.count * POD_W;
-  const ch = sprH('counterGray');
-  // grey counter top: blit one counterGray per slot (79>64 so they overlap into
-  // a seamless continuous grey), clipped to the pod span.
+  const { top, x0, span, ch } = counterRect(c);
+  // grey counter top: tiled counterGray clipped to the span (79>64 so per-slot
+  // blits overlap into a seamless continuous grey; one extra blit covers a
+  // widened single-pod span).
   ctx.save();
   ctx.beginPath(); ctx.rect(x0, top, span, ch + COUNTER_FRONT_H + 2); ctx.clip();
-  for (let k = 0; k < c.count; k++) blit(ctx, 'counterGray', x0 + k * POD_W, top);
+  for (let bx = x0; bx < x0 + span; bx += POD_W) blit(ctx, 'counterGray', bx, top);
   ctx.restore();
-  // tan leg dividers: one at each station boundary + the two end caps.
-  for (let k = 0; k <= c.count; k++) {
-    const lx = x0 + k * POD_W - (k === c.count ? 2 : 0);
+  // tan leg dividers: station boundaries + the two end caps.
+  const ndiv = Math.max(c.count, 1);
+  for (let k = 0; k <= ndiv; k++) {
+    const lx = k === ndiv ? x0 + span - 2 : x0 + Math.round((k / ndiv) * span);
     ctx.fillStyle = LEG_COLOR; ctx.fillRect(lx, top + 2, 2, ch + COUNTER_FRONT_H - 2);
     ctx.fillStyle = LEG_SHADE; ctx.fillRect(lx + 1, top + 2, 1, ch + COUNTER_FRONT_H - 2);
   }
@@ -1320,10 +1433,7 @@ function drawSheetCounter(c) {
 // pack has no printer sprite; what the atlas called "printer" is the real monitor.)
 function drawCounterFront(c) {
   if (!sheetReady()) return;
-  const top = c.y + CLUSTER_PAD + COUNTER_TOP - 2;
-  const x0 = c.x + CLUSTER_PAD;
-  const span = c.count * POD_W;
-  const ch = sprH('counterGray');
+  const { top, x0, span, ch } = counterRect(c);
   ctx.fillStyle = COUNTER_EDGE;
   ctx.fillRect(x0, top + ch, span, COUNTER_FRONT_H);
 }
@@ -1418,11 +1528,27 @@ function drawHybridFloor(slots) {
 function loop(t) {
   frame = Math.floor(t / 130); // ~7.7fps "typing" cadence
   if (ctx && bufW) {
+    const slots = totalSlots();
+
+    // Avatar: advance BEFORE the workers are drawn so it's positioned for this
+    // frame; draw it AFTER the workers (below). Hybrid only; cheap no-op while
+    // disabled (it still ticks its idle clock but doesn't move).
+    if (avatar) {
+      const dt = avatarLastT ? t - avatarLastT : 16;
+      avatarLastT = t;
+      const podPositions = [];
+      for (let i = 0; i < slots; i++) { if (agents[i]) { const o = podOrigin(i); podPositions.push({ x: o.x, y: o.y, i, agent: agents[i] }); } }
+      avatar.update(dt, { podPositions, bounds: { minX: MARGIN, maxX: bufW - MARGIN, minY: WALL_H + MARGIN, maxY: bufH - MARGIN } });
+      if (avatar.enabled) centerOnAvatar();
+    }
+
     drawRoom();
 
-    const slots = totalSlots();
     if (HYBRID) drawHybridFloor(slots);
     else for (let i = 0; i < slots; i++) drawProceduralPod(i);
+
+    // the user avatar, painted over the workers (under the hover/sel rings)
+    if (avatar && avatar.enabled) avatar.draw(ctx);
 
     // hover / selection highlights, painted over the workers
     if (hoverIdx >= 0 && hoverIdx !== selIdx && agents[hoverIdx]) {

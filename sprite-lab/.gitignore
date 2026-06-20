@@ -12,6 +12,5 @@ raw_*/
 !auburn-walk_preview.gif
 !coffee.png
 
-# office concept reference images (deliverable — inspiration, keep)
-!concepts/
-!concepts/*.png
+# office concept reference images: scratch inspiration, multi-MB, regenerable
+# via gen_concept.py — intentionally NOT tracked (caught by *.png above)
