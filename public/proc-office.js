@@ -46,8 +46,10 @@ function clusterDims(count) {
   };
 }
 
-// Group the (project-sorted) agents into runs, splitting big runs into pods of
-// up to 6 so no single cluster grows absurdly wide/tall.
+// One project = ONE team = ONE cluster (one rug, one label). The list arrives
+// project-sorted (see setAgents), so each project is a single contiguous run.
+// A big team is NOT split into pods — clusterDims() wraps it across rows WITHIN
+// the one cluster, so it never reads as two separate teams.
 function clusterRuns(list) {
   const runs = [];
   let i = 0;
@@ -55,12 +57,7 @@ function clusterRuns(list) {
     const key = list[i].project;
     let j = i;
     while (j < list.length && list[j].project === key) j++;
-    let run = j - i, start = i;
-    while (run > 0) {
-      const take = run > 6 ? (run === 7 ? 4 : 6) : run; // avoid stranding a single
-      runs.push({ project: key, start, count: take });
-      start += take; run -= take;
-    }
+    runs.push({ project: key, start: i, count: j - i });
     i = j;
   }
   return runs;
@@ -461,7 +458,7 @@ function syncLabels() {
       // rug's top strip so the team name reads as woven into the fabric.
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:600 13px 'VT323', ui-monospace, monospace;letter-spacing:1.5px;" +
+        "font:600 13px 'VT323', ui-monospace, monospace;letter-spacing:0.8px;" +
         'color:#f3ead2;text-align:center;' +
         'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
@@ -469,7 +466,10 @@ function syncLabels() {
       repoNodes[i] = el;
     }
     el.style.display = 'block';
-    el.style.maxWidth = (c.w + 6) + 'px'; // full pod width before truncating
+    // Allow the label to spill ~half the inter-cluster gap on each side so a
+    // tiny (1-agent) rug doesn't ellipsis a readable name; neighbours are also
+    // centred so the boxes meet at the gap midpoint without overlapping text.
+    el.style.maxWidth = (c.w + CLUSTER_GAP_X) + 'px';
     el.style.left = (c.x + c.w / 2) + 'px';
     el.style.top = (c.y + 2) + 'px'; // on the rug's top strip
     el.textContent = String(c.project || '').toUpperCase();
@@ -658,7 +658,13 @@ export function init(canvasEl, n, seed) {
 
 let started = false;
 export function setAgents(next) {
-  agents = next || [];
+  // Group same-project agents together so each project is one contiguous run
+  // (clusterRuns → one rug, one label per team) no matter what order /api/state
+  // returns them in. Stable + alphabetical: deterministic across polls so teams
+  // don't reshuffle as agents come and go. ponytail: project name only — the
+  // floor labels by project, so that's the unit a "team" reads as.
+  agents = (next || []).slice().sort((a, b) =>
+    String(a.project || '').localeCompare(String(b.project || '')));
   plan();
   canvas.width = bufW;
   canvas.height = bufH;
