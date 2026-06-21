@@ -225,25 +225,22 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   const hy = headTopY - breath;
   const blink = (frame + (seed % 11)) % 13 === 0;
 
-  // --- hair / head ---
+  // --- hair / head --- always draw FULL hair (incl. for headphone wearers) so
+  // nobody renders as a bare head with a stray dark bar laid across it.
   const hx = cx - 6;
-  if (!headphones) {
-    if (hairStyle === 1) { // tall quiff
-      px(ctx, hx, hy - 2, 12, 8, hair);
-      px(ctx, hx + 3, hy - 4, 6, 3, hair);
-    } else if (hairStyle === 2) { // side part
-      px(ctx, hx, hy, 12, 6, hair);
-      px(ctx, hx + 4, hy, 2, 3, shade(hair, 22));
-    } else if (hairStyle === 3) { // cropped
-      px(ctx, hx + 1, hy + 1, 10, 4, hair);
-    } else { // classic
-      px(ctx, hx, hy, 12, 6, hair);
-    }
-    px(ctx, hx - 1, hy + 4, 2, 7, hair); // sides
-    px(ctx, hx + 11, hy + 4, 2, 7, hair);
-  } else {
-    px(ctx, hx, hy, 12, 5, hair); // hair under the band
+  if (hairStyle === 1) { // tall quiff
+    px(ctx, hx, hy - 2, 12, 8, hair);
+    px(ctx, hx + 3, hy - 4, 6, 3, hair);
+  } else if (hairStyle === 2) { // side part
+    px(ctx, hx, hy, 12, 6, hair);
+    px(ctx, hx + 4, hy, 2, 3, shade(hair, 22));
+  } else if (hairStyle === 3) { // cropped
+    px(ctx, hx + 1, hy + 1, 10, 4, hair);
+  } else { // classic
+    px(ctx, hx, hy, 12, 6, hair);
   }
+  px(ctx, hx - 1, hy + 4, 2, 7, hair); // sides
+  px(ctx, hx + 11, hy + 4, 2, 7, hair);
   // face
   const fy = hy + 4;
   px(ctx, cx - 5, fy, 11, 10, skin);
@@ -266,9 +263,14 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   if (beard) px(ctx, cx - 5, fy + 7, 11, 3, shade(skin, -48));
   px(ctx, cx - 1, fy + 8, 3, 1, shade(skin, -30)); // mouth
   if (headphones) {
-    px(ctx, cx - 7, fy + 1, 2, 5, '#23262e');
-    px(ctx, cx + 5, fy + 1, 2, 5, '#23262e');
-    px(ctx, cx - 7, hy - 1, 14, 2, '#33373f');
+    // over-ear cups beside the face + a slim 1px band hugging the crown with a
+    // top highlight, so it reads as headphones — not a flat dark bar over the hair
+    px(ctx, cx - 8, fy + 1, 2, 6, '#2b2f38'); // left cup
+    px(ctx, cx - 8, fy + 2, 1, 4, '#454b55');  // left cup sheen
+    px(ctx, cx + 6, fy + 1, 2, 6, '#2b2f38'); // right cup
+    px(ctx, cx + 7, fy + 2, 1, 4, '#1d2026');  // right cup shade
+    px(ctx, cx - 6, hy - 1, 12, 1, '#2b2f38'); // crown band (slim)
+    px(ctx, cx - 5, hy - 2, 10, 1, '#454b55');  // band highlight, just above
   }
   // neck
   px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14));
@@ -304,9 +306,13 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
+  const idle = agent.activity === 'idle';
 
-  // --- the seated worker (head clears the desk, body behind it) ---
+  // --- the seated worker (head clears the desk, body behind it) --- dim when
+  // idle so active desks pop and idle ones visibly recede on a glance-scan
+  if (idle) ctx.globalAlpha = 0.5;
   drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame });
+  ctx.globalAlpha = 1;
 
   // --- a pinned flag floating just above the monitor (cozy personalization) ---
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
@@ -364,7 +370,7 @@ function drawMonitor(ctx, x, y, tier, agent, seed, frame) {
   // screen fill
   if (typing) px(ctx, x + 1, y + 1, mw - 2, mh - 2, shade(tier.screen, -16));
   else if (shellRunning) px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b130d');
-  else px(ctx, x + 1, y + 1, mw - 2, mh - 2, shade(tier.screen, -78));
+  else px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b0e14'); // idle → screen OFF (dark glass, no tier tint)
   // content
   if (typing) {
     const r = rng(seed * 31 + frame);
@@ -381,9 +387,9 @@ function drawMonitor(ctx, x, y, tier, agent, seed, frame) {
       px(ctx, x + 2, ly, Math.min(lw, mw - 4), 1, '#8bd450');
     }
     if (frame % 2) px(ctx, x + 2, y + mh - 3, 2, 1, '#8bd450');
-  } else {
-    px(ctx, x + 2, y + 4, 7, 1, shade(tier.code, -60));
-    px(ctx, x + 2, y + 7, 5, 1, shade(tier.code, -60));
+  } else { // idle: no content — just a faint glass reflection so it reads "off"
+    px(ctx, x + 2, y + 2, 1, mh - 4, 'rgba(255,255,255,0.06)');
+    px(ctx, x + 4, y + 3, 1, mh - 6, 'rgba(255,255,255,0.03)');
   }
   // stand
   px(ctx, x + (mw >> 1) - 1, y + mh, 3, 3, '#3a4150');

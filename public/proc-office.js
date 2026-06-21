@@ -33,6 +33,7 @@ let cells = [];      // {x, y, agent} — flattened, in draw order
 let labelWrap = null;        // the single group wrapper
 const nameNodes = [];        // pooled name-chip elements, reused between frames
 const repoNodes = [];        // pooled repo-label elements, reused between frames
+const leadNodes = [];        // pooled "▸ leadName" captions tying teammates to a lead
 
 // ---- layout ----------------------------------------------------------------
 
@@ -76,6 +77,11 @@ const LOUNGE_BAND_H = 60; // height of the decor band beneath the bullpen
 // counter ends at TOP+25) and the hanging ceiling pendants (end ~TOP+18). The
 // bullpen starts below this so decor never clips a cluster rug — count-independent.
 const AMENITY_BAND_H = 30;
+// Target bullpen aspect (width:height). >1 packs the desk clusters LANDSCAPE so
+// the floor fills a desktop viewport instead of a tall portrait column. Biased
+// well above 1 because the fixed amenity + lounge bands add height the bullpen
+// must out-widen. Tuned by eye against the floor-frame.
+const LANDSCAPE_ASPECT = 2.6;
 
 function plan() {
   clusters = []; decor = []; cells = [];
@@ -87,23 +93,30 @@ function plan() {
     const d = clusterDims(run.count);
     return { count: run.count, project: run.project, firstAgent: run.start, w: d.w, h: d.h, dims: d, seed: 101 + ci * 7 };
   });
-  const nC = sized.length;
-  const perRow = nC <= 1 ? 1 : nC <= 2 ? 2 : nC <= 6 ? 3 : 4;
-
-  // --- greedy row-wrap by CLUSTER COUNT (fixed perRow), tight gaps. Rows are
-  // left-aligned to a common bullpen origin; the whole bullpen is centred later. ---
+  // --- LANDSCAPE packing: wrap rows at a TARGET WIDTH derived from total cluster
+  // area × the aspect bias, so the bullpen reads wider-than-tall and fills a
+  // desktop viewport instead of a narrow column. Adapts to any team count: few
+  // teams → one wide row; many → a wide grid. The widest cluster sets a floor so
+  // a single big team never overflows its own row. ---
   const bx0 = MARGIN, by0 = TOP + AMENITY_BAND_H;
-  let col = 0, rowW = 0, rowTopH = 0;
+  const totalArea = sized.reduce((s, b) => s + (b.w + CLUSTER_GAP_X) * b.h, 0);
+  const widest = sized.reduce((m, b) => Math.max(m, b.w), 0);
+  const targetRowW = Math.max(widest, Math.sqrt(totalArea * LANDSCAPE_ASPECT));
+
+  let rowW = 0, rowTopH = 0;
   let cx = bx0, cy = by0;
   const rows = [[]];
   sized.forEach((b) => {
-    if (col === perRow) { // wrap
+    // wrap once the current row has REACHED the target width (the triggering
+    // cluster overhangs, which packs rows wider → more landscape). Greedy by
+    // width, not by a fixed cluster count.
+    if (rows[rows.length - 1].length && (cx - bx0) >= targetRowW) {
       cy += rowTopH + CLUSTER_GAP_Y;
-      cx = bx0; col = 0; rowTopH = 0; rows.push([]);
+      cx = bx0; rowTopH = 0; rows.push([]);
     }
     b.x = cx; b.y = cy;
     rows[rows.length - 1].push(b);
-    cx += b.w + CLUSTER_GAP_X; col++;
+    cx += b.w + CLUSTER_GAP_X;
     rowTopH = Math.max(rowTopH, b.h);
     rowW = Math.max(rowW, cx - CLUSTER_GAP_X - bx0);
   });
@@ -490,6 +503,61 @@ function syncLabels() {
     el.textContent = String(c.project || '').toUpperCase();
   });
   for (let i = clusters.length; i < repoNodes.length; i++) repoNodes[i].style.display = 'none';
+
+  // --- teammate → lead tie: a small "▸ leadName" caption just under a teammate's
+  // chip so a sub-agent reads as "X's helper", not a peer (pm1 sets kind/leadName). ---
+  cells.forEach((cell, i) => {
+    const a = cell.agent;
+    const tie = a.kind === 'teammate' && a.leadName ? '▸ ' + a.leadName : '';
+    let el = leadNodes[i];
+    if (!el) {
+      el = document.createElement('div');
+      el.style.cssText =
+        'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
+        "font:11px 'VT323', ui-monospace, monospace;color:#9fb3cf;" +
+        'text-shadow:0 1px 2px rgba(0,0,0,0.65);';
+      labelWrap.appendChild(el);
+      leadNodes[i] = el;
+    }
+    if (!tie) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.textContent = tie;
+    el.style.left = (cell.x + CELL_W / 2) + 'px';
+    el.style.top = (cell.y + CELL_H + 1) + 'px'; // just beneath the name chip
+  });
+  for (let i = cells.length; i < leadNodes.length; i++) leadNodes[i].style.display = 'none';
+
+  syncHiddenChip();
+}
+
+// A small floor control showing how many desks the user has hidden, toggling
+// them back into view. The hidden STATE is owned by app.js (agent.hidden); proc
+// just collapses them by default and offers a local reveal (no poll needed —
+// rebuild() re-filters lastAll). Anchored to the floor-frame, not the scaled
+// label layer, so it stays a crisp, fixed-size control.
+let hiddenChip = null;
+function syncHiddenChip() {
+  const host = world && world.parentElement;
+  if (!host) return;
+  if (!hiddenChip) {
+    hiddenChip = document.createElement('button');
+    hiddenChip.type = 'button';
+    hiddenChip.style.cssText =
+      'position:absolute;left:12px;top:12px;z-index:8;cursor:pointer;' +
+      'appearance:none;-webkit-appearance:none;outline:none;' +
+      'padding:3px 9px;border-radius:11px;white-space:nowrap;' +
+      'background:rgba(14,20,32,0.9);border:1px solid rgba(255,255,255,0.22);' +
+      "font:13px 'VT323', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
+    hiddenChip.addEventListener('click', () => { showHidden = !showHidden; rebuild(); });
+    host.appendChild(hiddenChip);
+  }
+  // count emptied → also drop the reveal flag, else a future hide would stay
+  // visible with no chip to re-collapse it (the chip is gone at count 0).
+  if (!hiddenCount) { showHidden = false; hiddenChip.style.display = 'none'; return; }
+  hiddenChip.style.display = 'inline-block';
+  hiddenChip.textContent = showHidden
+    ? `▾ hide ${hiddenCount} hidden`
+    : `▸ ${hiddenCount} away · show`;
 }
 
 // ---- camera: pan / zoom / click-to-select -----------------------------------
@@ -775,25 +843,39 @@ export function init(canvasEl, n, seed) {
 }
 
 let started = false;
-export function setAgents(next) {
-  // Group same-project agents together so each project is one contiguous run
-  // (clusterRuns → one rug, one label per team) no matter what order /api/state
-  // returns them in. Stable + alphabetical: deterministic across polls so teams
-  // don't reshuffle as agents come and go. ponytail: project name only — the
-  // floor labels by project, so that's the unit a "team" reads as.
-  agents = (next || []).slice().sort((a, b) =>
-    String(a.project || '').localeCompare(String(b.project || '')));
+let lastAll = [];        // last full agent set (pre hidden-filter), so the "show"
+let showHidden = false;  // toggle can re-reveal hidden desks without a fresh poll
+let hiddenCount = 0;
+
+const isActive = (a) => a.activity === 'working' || a.activity === 'shell';
+// Sort: group by project (one rug/label per team — clusterRuns needs each team
+// contiguous), then ACTIVE-first and LEAD-first WITHIN the team so the eye lands
+// on what's live. Stable + deterministic so teams don't reshuffle between polls.
+const agentOrder = (a, b) =>
+  String(a.project || '').localeCompare(String(b.project || '')) ||
+  (isActive(b) - isActive(a)) ||
+  ((b.role === 'lead') - (a.role === 'lead'));
+
+// Rebuild the scene from lastAll, honoring the hidden filter + showHidden toggle.
+// Shared by setAgents (new poll) and the "N away · show" toggle (no poll).
+function rebuild() {
+  hiddenCount = lastAll.reduce((n, a) => n + (a.hidden ? 1 : 0), 0);
+  agents = showHidden ? lastAll.slice() : lastAll.filter((a) => !a.hidden);
   plan();
   canvas.width = bufW;
   canvas.height = bufH;
   canvas.style.width = bufW * UPSCALE + 'px';   // crisp CSS upscale
   canvas.style.height = bufH * UPSCALE + 'px';
   ctx.imageSmoothingEnabled = false;
-  draw(); // repaint now — setting canvas.width cleared it; don't wait for the slow loop tick (avoids a blank frame each poll)
-  syncLabels(); // (re)position the DOM name + repo labels for the new layout
-  // Size/position the camera: fit-to-view until the user pans/zooms, then respect
-  // their view (just re-apply, since bufW/bufH may have changed with agent count).
+  draw();       // repaint now — setting canvas.width cleared it (avoids a blank frame)
+  syncLabels(); // (re)position the DOM name + repo + lead-tie labels + hidden chip
+  // fit-to-view until the user pans/zooms, then respect their view.
   if (!userMoved) fitView(); else applyCam();
+}
+
+export function setAgents(next) {
+  lastAll = (next || []).slice().sort(agentOrder);
+  rebuild();
   if (!started) { started = true; loop(); } // first data → kick off the animation loop
 }
 

@@ -27,6 +27,8 @@ let titleEl = null;
 let subEl = null;
 let currentKey = null; // selection key of the agent currently shown
 let reqToken = 0; // guards against out-of-order fetch responses
+let refreshTimer = null; // periodic /api/transcript re-fetch while the panel is open
+const REFRESH_MS = 5000; // how often to refresh the live metrics/status readout
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
@@ -88,6 +90,34 @@ function close() {
   panelEl.setAttribute('aria-hidden', 'true');
   currentKey = null;
   reqToken++; // abandon any in-flight fetch's render
+  stopRefresh();
+}
+
+// Stop the periodic metrics refresh (on close or before a new selection).
+function stopRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+// Re-fetch /api/transcript and patch the activity card's metrics + "doing now"
+// line IN PLACE (no body rebuild, so a half-typed rename is undisturbed). Used
+// on an interval while the panel is open so a transient 0 (e.g. a stale entry
+// crowding the metrics window for one tick) can't stick until the user
+// re-selects. On a transient miss we keep the last good values — never blank.
+function refreshMetrics(agent, token, card) {
+  if (token !== reqToken) return; // selection changed — this card is stale
+  const url = `/api/transcript?sessionId=${encodeURIComponent(agent.sessionId)}&cwd=${encodeURIComponent(agent.cwd)}`;
+  fetch(url, { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((data) => {
+      if (token !== reqToken) return;
+      fillActivityCard(card, agent, data && data.lastAction, data && data.metrics);
+    })
+    .catch(() => {
+      /* transient miss — leave the last good readout in place */
+    });
 }
 
 // ---- copy affordance ------------------------------------------------------
@@ -236,6 +266,84 @@ function renderNote(html) {
   n.className = 'cp-note';
   n.innerHTML = html;
   return n;
+}
+
+// ---- customize controls (rename + hide) -----------------------------------
+// A small "edit this agent" affordance for any agent with a sessionId (claude
+// sessions, teammates, opencode, codex). Both controls persist server-side via
+// POST /api/agent-override and only WRITE the field they touch:
+//   • RENAME → { sessionId, name }  (name:"" resets to the minted roster name)
+//   • HIDE   → { sessionId, hidden } (toggles agent.hidden; render.js owns state)
+// Each control flashes a transient confirmation on its own button, mirroring the
+// copyButton / openTerminalButton pattern, and never throws on a failed/non-JSON
+// response (we guard the .json() like openTerminalButton does).
+
+// POST a single override field and flash `btn` with the result. `prevText` is
+// restored after the flash; `body` carries only the field being changed.
+function postOverride(btn, body, prevText) {
+  btn.disabled = true;
+  fetch('/api/agent-override', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+    .then((r) => r.json().catch(() => ({})))
+    .then((d) => { btn.textContent = d && d.ok ? '✓ saved' : '⚠ failed'; btn.classList.toggle('ok', !!(d && d.ok)); })
+    .catch(() => { btn.textContent = '⚠ failed'; btn.classList.remove('ok'); })
+    .finally(() => {
+      setTimeout(() => { btn.textContent = prevText; btn.classList.remove('ok'); btn.disabled = false; }, 1400);
+    });
+}
+
+function customizeControls(a) {
+  // Gate: only render for a selectable real agent carrying a sessionId.
+  if (!a || !a.sessionId) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cp-customize';
+
+  // --- rename: input pre-filled with the current name + a Save button. Saving
+  // an empty input clears the custom name (server resets to the minted name). ---
+  const renameRow = document.createElement('div');
+  renameRow.className = 'cp-cust-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'cp-cust-input';
+  input.value = a.name || '';
+  input.placeholder = 'Rename this agent…';
+  input.title = 'Rename this agent (clear to reset to its minted name)';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'cp-cust-save';
+  save.textContent = 'Save';
+  save.title = 'Save the new name';
+  const submitName = () => postOverride(save, { sessionId: a.sessionId, name: input.value.trim() }, 'Save');
+  save.addEventListener('click', submitName);
+  // Enter in the field saves too (blur is left alone so tabbing away is quiet).
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitName(); }
+  });
+  renameRow.appendChild(input);
+  renameRow.appendChild(save);
+  wrap.appendChild(renameRow);
+
+  // --- hide: a toggle reflecting agent.hidden. Optimistically flips its own
+  // label; the next /api/state poll reflects the real (render-owned) state. ---
+  const hide = document.createElement('button');
+  hide.type = 'button';
+  hide.className = 'cp-cust-hide';
+  const labelFor = (hidden) => (hidden ? 'Unhide' : 'Hide from floor');
+  hide.textContent = labelFor(a.hidden);
+  hide.title = 'Hide this agent from the office floor';
+  hide.addEventListener('click', () => {
+    const next = !a.hidden;
+    a.hidden = next; // optimistic; render.js reconciles on the next poll
+    const prev = labelFor(next);
+    postOverride(hide, { sessionId: a.sessionId, hidden: next }, prev);
+  });
+  wrap.appendChild(hide);
+
+  return wrap;
 }
 
 // ---- status + metrics card ------------------------------------------------
@@ -479,6 +587,7 @@ function show(agent) {
   // still-in-flight Claude transcript response can't render into a later
   // selection's panel (e.g. clicking a Claude agent then a teammate).
   reqToken++;
+  stopRefresh(); // a prior agent's refresh loop must not patch this selection
   setHeader(agent);
   open();
 
@@ -500,6 +609,10 @@ function show(agent) {
     } else {
       bodyEl.appendChild(renderNote('<span class="cp-dim">No launch brief on record.</span>'));
     }
+    // Teammates can be renamed/hidden too when they carry a sessionId-ish key;
+    // customizeControls self-gates and returns null for ones without it.
+    const cust = customizeControls(agent);
+    if (cust) bodyEl.appendChild(cust);
     return;
   }
 
@@ -513,6 +626,8 @@ function show(agent) {
     );
     const acts = actionsFor(agent, null);
     if (acts) bodyEl.appendChild(acts);
+    const cust = customizeControls(agent);
+    if (cust) bodyEl.appendChild(cust);
     return;
   }
 
@@ -543,6 +658,8 @@ function show(agent) {
   bodyEl.appendChild(activityCard);
   const acts = actionsFor(agent, null);
   if (acts) bodyEl.appendChild(acts);
+  const cust = customizeControls(agent);
+  if (cust) bodyEl.appendChild(cust);
 
   const token = reqToken; // already bumped at the top of show(); guards this fetch
   const url = `/api/transcript?sessionId=${encodeURIComponent(agent.sessionId)}&cwd=${encodeURIComponent(agent.cwd)}`;
@@ -559,6 +676,10 @@ function show(agent) {
       if (replyBox) bodyEl.appendChild(replyBox);
       bodyEl.appendChild(activityCard);
       if (newActs) bodyEl.appendChild(newActs);
+      // Re-append the customize controls — the rebuild cleared bodyEl. Reuse the
+      // same element (innerHTML='' only detached it) so any half-typed rename or
+      // in-flight save flash survives the metrics patch.
+      if (cust) bodyEl.appendChild(cust);
     })
     .catch(() => {
       if (token !== reqToken) return;
@@ -566,6 +687,11 @@ function show(agent) {
       // just clear the pending metrics to em-dashes.
       fillActivityCard(activityCard, agent, null, null);
     });
+
+  // Keep the readout fresh while the panel stays open: re-fetch metrics + status
+  // on an interval so a momentary 0 can't stick until the user re-selects. Patches
+  // the card in place (see refreshMetrics) without rebuilding the body.
+  refreshTimer = setInterval(() => refreshMetrics(agent, token, activityCard), REFRESH_MS);
 }
 
 // Normalize the event detail: accept either { agent } or the agent directly,

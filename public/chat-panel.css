@@ -260,6 +260,90 @@
   cursor: default;
 }
 
+/* customize controls (rename + hide): a small "edit this agent" affordance for
+   any agent with a sessionId. Reads as a quiet edit row beneath the actions, not
+   a dominant block. Reuses the shared :root tokens. */
+.cp-customize {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dotted var(--line2);
+  padding-top: 10px;
+}
+.cp-cust-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.cp-cust-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: var(--term);
+  font-size: 15px;
+  color: var(--ink);
+  background: #0c1119;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 5px 7px;
+}
+.cp-cust-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.cp-cust-save {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: #16203a;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+.cp-cust-save:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.cp-cust-save.ok {
+  color: var(--green);
+  border-color: var(--green);
+}
+.cp-cust-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cp-cust-hide {
+  align-self: flex-start;
+  font-family: var(--pixel);
+  font-size: 7px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.cp-cust-hide:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+.cp-cust-hide.ok {
+  color: var(--green);
+  border-color: var(--green);
+}
+.cp-cust-hide:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* "needs you" HUD pill (Control Phase-1): a non-intrusive topbar chip counting
    agents paused on a Stop hook. Lives here (not style.css) to keep the control
    feature self-contained; reuses the shared :root tokens. */

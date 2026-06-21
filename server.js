@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getUsage } from './lib/usage.js';
 import { getLive } from './lib/live.js';
-import { identityFor } from './lib/roster.js';
+import { identityFor, overrideFor, setOverride } from './lib/roster.js';
 import { getTranscript } from './lib/transcript.js';
 import * as control from './lib/control.js';
 
@@ -46,16 +46,21 @@ function buildState() {
     const ident = identityFor(a.sessionId, a.model, a.startedAt);
     const w = a.sessionId ? waiting[a.sessionId] : null;
     const ctrl = w ? { awaitingReply: true, pendingSince: w.since } : null;
+    // User overrides (rename / hide), persisted per sessionId. A custom name
+    // wins over the minted persona AND the teammate label; `hidden` is carried
+    // on EVERY agent (default false) so consumers never see undefined.
+    const ov = overrideFor(a.sessionId);
     if (a.role === 'teammate') {
       return {
         ...a,
         ...ident,
         ...ctrl,
-        name: a.teammateName || ident.name,
+        name: ov.name || a.teammateName || ident.name,
         title: a.teammateType || ident.title,
+        hidden: ov.hidden,
       };
     }
-    return { ...a, ...ident, ...ctrl };
+    return { ...a, ...ident, ...ctrl, name: ov.name || ident.name, hidden: ov.hidden };
   });
 
   return {
@@ -280,6 +285,51 @@ const server = http.createServer((req, res) => {
           else sendJSON(res, 404, { error: 'no agent waiting for this session' });
         } catch (err) {
           sendJSON(res, 500, { error: String(err && err.message ? err.message : err) });
+        }
+      });
+      return;
+    }
+    // OVERRIDE endpoint — persist a per-session rename / hide. Authorized like
+    // the other POSTs; it writes only data/roster.json (a regenerable cache),
+    // never the ~/.claude data sources. Body { sessionId, name?, hidden? }:
+    // name '' or null clears the rename; hidden is a boolean toggle. Only the
+    // keys present in the body are applied, so a hide-toggle won't wipe a rename.
+    if (pathname === '/api/agent-override' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => {
+        body += c;
+        if (body.length > 4096) req.destroy(); // cap — these payloads are tiny
+      });
+      req.on('end', () => {
+        // Fires after the top-level try/catch returns, so guard it too — a throw
+        // here would crash the process (fail-soft charter: a bad request must
+        // never take down the server / /api/state).
+        try {
+          let info;
+          try {
+            info = JSON.parse(body || '{}');
+          } catch {
+            return sendJSON(res, 400, { error: 'bad json' });
+          }
+          const { sessionId, name, hidden } = info || {};
+          if (!sessionId || typeof sessionId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+            return sendJSON(res, 400, { error: 'invalid sessionId' }); // match /api/reply's charset guard
+          }
+          // Pass through only the keys actually present so a hide-toggle doesn't
+          // wipe the name and vice-versa. roster.setOverride trims + length-caps
+          // + strips control chars from the name; it is never eval'd or exec'd.
+          const patch = {};
+          if (Object.prototype.hasOwnProperty.call(info, 'name')) patch.name = name;
+          if (Object.prototype.hasOwnProperty.call(info, 'hidden')) {
+            if (typeof hidden !== 'boolean') {
+              return sendJSON(res, 400, { error: 'hidden must be a boolean' });
+            }
+            patch.hidden = hidden;
+          }
+          const override = setOverride(sessionId, patch);
+          sendJSON(res, 200, { ok: true, override });
+        } catch (err) {
+          sendJSON(res, 500, { ok: false, error: String(err && err.message ? err.message : err) });
         }
       });
       return;
