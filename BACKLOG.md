@@ -2,6 +2,32 @@
 
 Ideas noted but not yet built. (Mirrors the maintainer's working notes.)
 
+## Phase 2 — public release & social (north star, surfaced 2026-06-21)
+
+The vision: ship Agency to the public, self-installable, to view your AI agents
+"as employees" — then a social layer on top. Big shift: today's local, read-only,
+never-phones-home design is the opposite of what this needs.
+
+- **Public, self-installable build** — one-command install for non-devs; cross-platform
+  (adapters are macOS-local-path-specific today — Windows/Linux + single-harness users
+  need handling); graceful with zero agents. The menu-bar wrapper (Possible extras)
+  becomes important here.
+- **Cloud/backend + accounts** — prerequisite for anything social. Privacy/consent is
+  make-or-break: opt-in, aggregate/anonymized by default (share "team of 174 / eng-years",
+  never transcripts or repo names).
+- **Leaderboard** — rank by a STANDARDIZED, gameability-resistant metric (fixed constants,
+  not the personal sliders). Personal view keeps the sliders; the leaderboard uses
+  verifiable output. The accuracy/honesty work is the moat against vanity + inflation.
+- **View other offices** — visit other people's floors (read-only, consented).
+- **Virtual city** — each office is one building; the city is a zoom-out over the same
+  renderer. Don't build it before one office is delightful.
+- **Launch video** — the single-player polish IS the trailer: agents as employees, idle
+  ones go dark & wander, the lead's crown, the live token burn. Needs life on the floor
+  (idle-wander) + a busy floor.
+
+_Sequencing:_ nail the single-player core first (current rounds) — it's both what people
+install and the video. Social/city is Phase 2 on a backend.
+
 ## Deferred
 
 - **Make hybrid the default** — once the `?render=hybrid` Neighborhoods view is
