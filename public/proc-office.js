@@ -7,7 +7,7 @@ import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
   drawWall, drawFloor, drawDaylight,
-  drawCubicle, drawCrown, CELL_W, CELL_H,
+  drawCubicle, drawCrown, drawNeedsYou, CELL_W, CELL_H,
 } from './proc-sprites.js';
 
 const WALL_H = 70;                 // cream wall band; fills from the top of canvas
@@ -436,7 +436,15 @@ function syncLabels() {
       name.style.cssText =
         `font:${NAME_FONT};color:#eef3fb;line-height:1;` +
         'overflow:hidden;text-overflow:ellipsis;';
-      el.appendChild(dot); el.appendChild(name);
+      // "just finished / unread" pip — a distinct PINK notification dot at the
+      // chip's top-right corner, deliberately set apart from the activity LED
+      // (green/amber/grey) on the chip's left, so the two never read as the same.
+      const pip = document.createElement('span');
+      pip.dataset.role = 'pip';
+      pip.style.cssText =
+        'position:absolute;top:-4px;right:-4px;width:6px;height:6px;border-radius:50%;' +
+        'background:#ff5cba;box-shadow:0 0 6px #ff5cba;display:none;';
+      el.appendChild(dot); el.appendChild(name); el.appendChild(pip);
       labelWrap.appendChild(el);
       nameNodes[i] = el;
     }
@@ -444,11 +452,14 @@ function syncLabels() {
     // pin the chip just under the desk content, centred on the cell
     el.style.left = (cell.x + CELL_W / 2) + 'px';
     el.style.top = (cell.y + CELL_H - 10) + 'px';
-    const dot = el.firstChild, name = el.lastChild;
+    const dot = el.firstChild, name = el.children[1], pip = el.children[2];
     const col = statusColor(a.activity);
     dot.style.background = col;
     dot.style.boxShadow = a.activity === 'idle' ? 'none' : `0 0 4px ${col}`;
     name.textContent = first;
+    // unread pip: agent just finished + not yet viewed (app.js owns the set)
+    const unread = !!(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
+    pip.style.display = unread ? 'block' : 'none';
   });
   for (let i = cells.length; i < nameNodes.length; i++) nameNodes[i].style.display = 'none';
 
@@ -700,6 +711,9 @@ function attachInput() {
   recenterBtn = document.getElementById('recenter');
   if (recenterBtn) recenterBtn.addEventListener('click', () => { userMoved = false; fitView(); });
   window.addEventListener('resize', () => { if (!userMoved) fitView(); else { clampPan(); applyCam(); } });
+  // app.js mutates window.agencyUnread between polls and fires this; re-sync the
+  // per-desk unread pips (syncLabels reads window.agencyUnread directly).
+  window.addEventListener('agency:unread', () => syncLabels());
 }
 
 // ---- scene -----------------------------------------------------------------
@@ -720,6 +734,13 @@ function draw() {
     const hovered = k != null && k === hoverKey && !selected;
     drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered);
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
+  }
+  // "Waiting on you" — highest-signal state, painted LAST so it floats above every
+  // desk. agent.needsYou is pm1's field; awaitingReply is render.js's name for the
+  // same thing, kept as a harmless fallback. Falsy/absent → not waiting.
+  for (const cell of cells) {
+    const a = cell.agent;
+    if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x + CELL_W / 2 + 2, cell.y + 22, frame);
   }
 }
 

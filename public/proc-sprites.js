@@ -468,6 +468,31 @@ function drawRing(ctx, x, y, w, h, color, frame, strong) {
   ctx.globalAlpha = 1;
 }
 
+// "Waiting on you" — an amber speech bubble with a "!" bobbing up-right of the
+// head, with a soft pulsing halo. The floor's highest-signal state (a background
+// agent blocked on the user). Ported from sprites.js:drawNeedsYou so proc matches
+// the original's look. (cx, headTopY) = head centre-x, head-top y.
+export function drawNeedsYou(ctx, cx, headTopY, frame) {
+  const bob = frame % 6 < 3 ? 0 : 1;
+  const bx = cx + 8; // offset right of the head
+  const y = headTopY - 6 - bob;
+  // soft pulsing halo behind the bubble
+  ctx.globalAlpha = frame % 8 < 4 ? 0.34 : 0.16;
+  px(ctx, bx - 2, y - 1, 16, 13, '#ffb454');
+  ctx.globalAlpha = 1;
+  // amber bubble body + a little tail pointing down toward the head
+  px(ctx, bx - 1, y, 12, 9, '#ffb454');
+  px(ctx, bx - 1, y, 12, 1, '#ffd793');   // top highlight
+  px(ctx, bx - 1, y + 8, 12, 1, '#e08a2a'); // bottom shade
+  px(ctx, bx - 2, y + 2, 1, 5, '#ffb454'); // left round
+  px(ctx, bx + 11, y + 2, 1, 5, '#e89030'); // right round
+  px(ctx, bx, y + 9, 3, 2, '#ffb454');     // tail toward the head
+  px(ctx, bx, y + 11, 1, 1, '#e08a2a');
+  // dark "!" glyph centred in the bubble
+  px(ctx, bx + 4, y + 2, 2, 4, '#3a2606');
+  px(ctx, bx + 4, y + 7, 2, 1, '#3a2606');
+}
+
 // PM crown — a small gold crown bobbing above the lead's head.
 export function drawCrown(ctx, cx, headTopY, frame) {
   const bob = frame % 8 < 4 ? 0 : 1;

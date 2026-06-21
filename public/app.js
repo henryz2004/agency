@@ -132,8 +132,9 @@ function onState() {
   updateSound(workingCount);
   $('emptyBanner').classList.toggle('hidden', live.agents.length > 0);
 
-  // Control Phase-1 HUD: agents paused on a Stop hook, waiting on a reply.
-  renderWaiting(live.agents.filter((a) => a.awaitingReply));
+  // "Waiting on you" HUD: agents paused on a Stop hook (awaitingReply) OR a
+  // background agent blocked waiting on the user (needsYou) — both need a look.
+  renderWaiting(live.agents.filter((a) => a.awaitingReply || a.needsYou));
 
   renderManpower();
   renderModels(usage);
