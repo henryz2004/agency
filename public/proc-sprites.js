@@ -344,8 +344,9 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
     for (let i = 0; i < n; i++) drawMinion(ctx, sx + i * sp, y + CELL_H - 4, (frame + i) % 2);
   }
 
-  // --- selection / hover ring ---
-  if (selected || hovered) drawRing(ctx, x, y, CELL_W, CELL_H, selected ? tier.led : '#ffffff', frame, selected);
+  // --- selection / hover ring --- (selected = persistent tier-colored pulse;
+  // hover = cyan, matching render.js's #5cd0ff hover ring)
+  if (selected || hovered) drawRing(ctx, x, y, CELL_W, CELL_H, selected ? tier.led : '#5cd0ff', frame, selected);
 }
 
 function ledColor(act, frame) {

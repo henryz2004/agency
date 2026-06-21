@@ -1,14 +1,16 @@
-// chat-panel.js — read-only "open this agent's chat" side panel.
+// chat-panel.js — read-only "open this agent's status" side panel.
 //
 // Listens for an `agency:select` CustomEvent (dispatched by render.js when a
-// desk is clicked) and slides in a panel that peeks the selected agent's recent
-// transcript via GET /api/transcript. Reading is READ-ONLY (just the trailing
-// transcript). The one action it offers is "Open in Terminal", which POSTs
+// desk is clicked) and slides in a panel that summarizes the selected agent's
+// truthful status. For a real Claude session it leads with a STATUS + METRICS
+// card (honest state from the agent itself + a 30-min activity readout fetched
+// from GET /api/transcript) — NOT a dump of the conversation. Reading is
+// READ-ONLY. The one action it offers is "Open in Terminal", which POSTs
 // /api/resume to jump back into the session via `claude --resume`.
 //
 // Agent kinds it handles:
 //   - Claude sessions (role null/lead, source 'claude', has sessionId+cwd) →
-//     fetch and render the last messages.
+//     status + metrics card (idle or working), plus the resume footer.
 //   - In-process teammates (role 'teammate', kind 'teammate') → have no
 //     transcript of their own; show their launch brief from the team config
 //     instead, plus the lead's resume hint.
@@ -229,21 +231,6 @@ function openTerminalButton(a) {
   return b;
 }
 
-function renderMessages(messages) {
-  const list = document.createElement('div');
-  list.className = 'cp-messages';
-  for (const m of messages) {
-    const row = document.createElement('div');
-    row.className = `cp-msg ${m.role === 'user' ? 'user' : 'assistant'}`;
-    const who = m.role === 'user' ? 'you' : 'agent';
-    row.innerHTML =
-      `<div class="cp-msg-role">${who}</div>` +
-      `<div class="cp-msg-text">${esc(m.text)}</div>`;
-    list.appendChild(row);
-  }
-  return list;
-}
-
 function renderNote(html) {
   const n = document.createElement('div');
   n.className = 'cp-note';
@@ -251,16 +238,26 @@ function renderNote(html) {
   return n;
 }
 
-// ---- "current task in progress" card (working mode) -----------------------
-// When an agent is WORKING (not waiting on you), the panel leads with this: a
-// glanceable summary of what it's up to RIGHT NOW — its activity, the live
-// action (current tool + file, from the transcript's lastAction), and the task
-// it's on. The transcript still renders below as supporting context.
+// ---- status + metrics card ------------------------------------------------
+// For EVERY real Claude session (idle OR working) the panel leads with this: a
+// truthful status badge from the agent's OWN state, the task it's on, a 30-min
+// activity readout (tool calls + tokens), and — ONLY when a tool is genuinely
+// in flight — a live "doing now" line. We deliberately do NOT dump the
+// conversation; the user wants honest status, not a transcript to read.
 
 // The task/topic the agent is working toward — its AI chat title, the CLI task
 // name, or the last user prompt, in that order of usefulness.
 function taskLabel(a) {
   return a.chatName || a.task || a.lastPrompt || null;
+}
+
+// Compact a count for the metrics line: <1000 as-is, else "12.3k", "1.2M".
+function fmtCount(n) {
+  if (n == null || !isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs < 1000) return String(n);
+  if (abs < 1e6) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
 }
 
 // One-word status + matching css class for the activity dot/headline.
@@ -280,10 +277,10 @@ function actionLine(lastAction) {
   return `${verb}${target ? ' ' + target : ''}`;
 }
 
-// The working-mode header card. `lastAction` arrives with the transcript fetch;
-// we render the card immediately (without it) and patch the action line in once
-// the fetch resolves, so the card never blocks on the network.
-function renderActivityCard(a, lastAction) {
+// The status + metrics header card. `lastAction` + `metrics` arrive with the
+// transcript fetch; we render the card immediately (with both null) and patch
+// them in once the fetch resolves, so the card never blocks on the network.
+function renderActivityCard(a, lastAction, metrics) {
   const s = statusBits(a);
   const card = document.createElement('div');
   card.className = `cp-activity ${s.cls}`;
@@ -301,12 +298,18 @@ function renderActivityCard(a, lastAction) {
     card.appendChild(t);
   }
 
-  // The live action line; filled async (see show()). Hidden until it has text.
+  // The headline 30-min activity readout; renders em-dashes until the fetch
+  // resolves, then patches in real counts (see show()).
+  const stat = document.createElement('div');
+  stat.className = 'cp-act-metrics';
+  setMetricsLine(stat, metrics);
+  card.appendChild(stat);
+
+  // The live "doing now" line — populated ONLY when a tool is genuinely in
+  // flight. Patched async; starts empty (no false "running" text on idle).
   const act = document.createElement('div');
   act.className = 'cp-act-now';
-  const line = actionLine(lastAction);
-  if (line) act.innerHTML = `<span class="cp-act-label">doing now</span> ${line}`;
-  else act.classList.add('cp-act-pending');
+  setActionLine(act, a, lastAction);
   card.appendChild(act);
 
   const sub = (a.subagents || []).length;
@@ -319,21 +322,45 @@ function renderActivityCard(a, lastAction) {
   return card;
 }
 
-// Update an already-rendered activity card's live action line in place (called
-// after the transcript fetch resolves with lastAction).
-function fillActionLine(card, lastAction) {
-  if (!card) return;
-  const act = card.querySelector('.cp-act-now');
-  if (!act) return;
+// Fill the metrics readout element from a `metrics` object. Missing metrics
+// degrade to em-dashes rather than vanishing, so the headline stat stays put.
+function setMetricsLine(el, metrics) {
+  const win = (metrics && metrics.windowMin) || 30;
+  const calls = metrics ? fmtCount(metrics.toolCalls30m) : '—';
+  const toks = metrics ? fmtCount(metrics.tokensOut30m) : '—';
+  el.innerHTML =
+    `<span class="cp-act-bolt">⚡</span> ${esc(calls)} tool calls · ` +
+    `${esc(toks)} tokens <span class="cp-act-win">· last ${esc(win)} min</span>`;
+}
+
+// Fill the "doing now" line. CRUCIAL honesty rule: when `lastAction` is null we
+// print NOTHING (the status badge already says idle/running) — UNLESS the agent
+// is genuinely mid-generation (activity 'working' with no tool in flight), in
+// which case a subtle "thinking…" is fair. A null action on an idle/shell agent
+// must never read as "doing now …".
+function setActionLine(el, a, lastAction) {
   const line = actionLine(lastAction);
   if (line) {
-    act.innerHTML = `<span class="cp-act-label">doing now</span> ${line}`;
-    act.classList.remove('cp-act-pending');
+    el.innerHTML = `<span class="cp-act-label">doing now</span> ${line}`;
+    el.classList.remove('cp-act-empty');
+  } else if (a.activity === 'working') {
+    el.innerHTML = '<span class="cp-act-label">doing now</span> <span class="cp-dim">thinking…</span>';
+    el.classList.remove('cp-act-empty');
   } else {
-    // No discernible in-flight action (e.g. mid-thought) — say so plainly.
-    act.innerHTML = '<span class="cp-act-label">doing now</span> <span class="cp-dim">thinking…</span>';
-    act.classList.remove('cp-act-pending');
+    // Idle / shell with no in-flight tool — say nothing here.
+    el.textContent = '';
+    el.classList.add('cp-act-empty');
   }
+}
+
+// Patch an already-rendered card's metrics + action lines in place (called after
+// the transcript fetch resolves). Mirrors the pre-render-then-patch pattern.
+function fillActivityCard(card, a, lastAction, metrics) {
+  if (!card) return;
+  const stat = card.querySelector('.cp-act-metrics');
+  if (stat) setMetricsLine(stat, metrics);
+  const act = card.querySelector('.cp-act-now');
+  if (act) setActionLine(act, a, lastAction);
 }
 
 // ---- reply box (Control Phase-1) ------------------------------------------
@@ -356,8 +383,7 @@ function renderReplyBox(agent) {
   // Show the agent's parting question only when we actually have it
   // (pendingQuestion). We deliberately DON'T fall back to lastPrompt/chatName —
   // those are the last *user* prompt / chat title, not what the agent is asking,
-  // so labelling them as its question would mislead. The transcript tail
-  // rendered below already shows the agent's real last message for context.
+  // so labelling them as its question would mislead.
   if (agent.pendingQuestion) {
     const ctx = document.createElement('div');
     ctx.className = 'cp-reply-q';
@@ -490,7 +516,7 @@ function show(agent) {
     return;
   }
 
-  // ---- real Claude session: fetch the transcript tail ----------------------
+  // ---- real Claude session: status + metrics card --------------------------
   if (!agent.sessionId || !agent.cwd) {
     bodyEl.innerHTML = '';
     bodyEl.appendChild(renderNote('<span class="cp-dim">No transcript available for this agent.</span>'));
@@ -498,28 +524,25 @@ function show(agent) {
   }
 
   // CONTEXTUAL MODE — the panel adapts to the agent's state:
-  //   • WAITING ON YOU (awaitingReply): reply box pinned on top, then the recent
-  //     conversation below so you can see what it asked and answer.
-  //   • WORKING / shell (and NOT waiting): lead with the "current task in
-  //     progress" card (what it's doing right now), transcript below as context.
-  //   • IDLE / done: just the conversation.
-  // The reply box + activity card render IMMEDIATELY (before the transcript
-  // fetch) so the panel is useful the instant a desk is clicked; the transcript
-  // and the live action line fill in once the fetch resolves.
+  //   • WAITING ON YOU (awaitingReply): reply box pinned on top, then the
+  //     status + metrics card below it so you can answer in context.
+  //   • IDLE / WORKING / done (and NOT waiting): just the status + metrics card.
+  // The status + metrics card builds for EVERY real Claude session (idle
+  // included) — its badge is the agent's OWN honest state, not derived from the
+  // fetch. The reply box + card render IMMEDIATELY (before the fetch) so the
+  // panel is useful the instant a desk is clicked; the live metrics + "doing
+  // now" line patch in once the transcript fetch resolves.
   const waiting = !!agent.awaitingReply;
-  const working = !waiting && (agent.activity === 'working' || agent.activity === 'shell');
 
   const replyBox = waiting ? renderReplyBox(agent) : null;
-  // The activity card is pre-built so we can patch its action line in async.
-  const activityCard = working ? renderActivityCard(agent, null) : null;
+  // The card is pre-built (metrics + action null) so we can patch them in async.
+  const activityCard = renderActivityCard(agent, null, null);
 
   bodyEl.innerHTML = '';
   if (replyBox) bodyEl.appendChild(replyBox);
-  if (activityCard) bodyEl.appendChild(activityCard);
-  const loading = document.createElement('div');
-  loading.className = 'cp-loading';
-  loading.textContent = working ? 'Loading recent activity…' : 'Opening chat…';
-  bodyEl.appendChild(loading);
+  bodyEl.appendChild(activityCard);
+  const acts = actionsFor(agent, null);
+  if (acts) bodyEl.appendChild(acts);
 
   const token = reqToken; // already bumped at the top of show(); guards this fetch
   const url = `/api/transcript?sessionId=${encodeURIComponent(agent.sessionId)}&cwd=${encodeURIComponent(agent.cwd)}`;
@@ -527,51 +550,22 @@ function show(agent) {
     .then((r) => r.json())
     .then((data) => {
       if (token !== reqToken) return; // a newer selection superseded this one
-      // Patch the live action line into the activity card from the fetched data.
-      if (activityCard) fillActionLine(activityCard, data && data.lastAction);
-      // Keep the pinned header (reply box / activity card) at the top; rebuild
-      // only the transcript region below it.
+      // Patch the live metrics + "doing now" line into the card. lastAction is
+      // null whenever no tool is in flight; setActionLine handles that honestly.
+      fillActivityCard(activityCard, agent, data && data.lastAction, data && data.metrics);
+      // Rebuild the resume footer with the transcript's resumeCmd if present.
+      const newActs = actionsFor(agent, data);
       bodyEl.innerHTML = '';
       if (replyBox) bodyEl.appendChild(replyBox);
-      if (activityCard) bodyEl.appendChild(activityCard);
-      const messages = (data && data.messages) || [];
-      // In working mode the transcript is supporting context, so label it.
-      if (working && messages.length) {
-        bodyEl.appendChild(sectionLabel('Recent activity'));
-      }
-      if (messages.length) {
-        bodyEl.appendChild(renderMessages(messages));
-      } else {
-        bodyEl.appendChild(
-          renderNote('<span class="cp-dim">No recent messages in the transcript tail.</span>')
-        );
-      }
-      const acts = actionsFor(agent, data);
-      if (acts) bodyEl.appendChild(acts);
-      // Newest message is at the bottom; scroll there — UNLESS a pinned header
-      // (reply box or activity card) is up top, in which case keep it in view
-      // (that's the point of leading with it).
-      if (!replyBox && !activityCard) bodyEl.scrollTop = bodyEl.scrollHeight;
+      bodyEl.appendChild(activityCard);
+      if (newActs) bodyEl.appendChild(newActs);
     })
     .catch(() => {
       if (token !== reqToken) return;
-      if (activityCard) fillActionLine(activityCard, null);
-      bodyEl.innerHTML = '';
-      if (replyBox) bodyEl.appendChild(replyBox);
-      if (activityCard) bodyEl.appendChild(activityCard);
-      bodyEl.appendChild(renderNote('<span class="cp-dim">Couldn\'t load the transcript.</span>'));
-      const acts = actionsFor(agent, null);
-      if (acts) bodyEl.appendChild(acts);
+      // Couldn't reach /api/transcript — leave the honest status badge alone and
+      // just clear the pending metrics to em-dashes.
+      fillActivityCard(activityCard, agent, null, null);
     });
-}
-
-// A small uppercase section divider used between the activity card and the
-// supporting transcript in working mode.
-function sectionLabel(text) {
-  const el = document.createElement('div');
-  el.className = 'cp-section-label';
-  el.textContent = text;
-  return el;
 }
 
 // Normalize the event detail: accept either { agent } or the agent directly,

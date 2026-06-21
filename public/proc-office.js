@@ -72,6 +72,10 @@ function clusterRuns(list) {
 const CLUSTER_GAP_X = 12; // tight gap between adjacent desk clusters on a row
 const CLUSTER_GAP_Y = 10; // gap between rows of desk clusters (tight, like the ref)
 const LOUNGE_BAND_H = 60; // height of the decor band beneath the bullpen
+// Reserved band at the top of the floor for back-wall amenities (the kitchen
+// counter ends at TOP+25) and the hanging ceiling pendants (end ~TOP+18). The
+// bullpen starts below this so decor never clips a cluster rug — count-independent.
+const AMENITY_BAND_H = 30;
 
 function plan() {
   clusters = []; decor = []; cells = [];
@@ -88,7 +92,7 @@ function plan() {
 
   // --- greedy row-wrap by CLUSTER COUNT (fixed perRow), tight gaps. Rows are
   // left-aligned to a common bullpen origin; the whole bullpen is centred later. ---
-  const bx0 = MARGIN, by0 = TOP + MARGIN;
+  const bx0 = MARGIN, by0 = TOP + AMENITY_BAND_H;
   let col = 0, rowW = 0, rowTopH = 0;
   let cx = bx0, cy = by0;
   const rows = [[]];
@@ -491,6 +495,12 @@ const cam = { x: 0, y: 0, s: 1 }; // s multiplies the UPSCALE base
 let userMoved = false;            // once the user pans/zooms, stop auto-fitting
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+// Selection + hover, tracked by a STABLE key so the selection survives the 3s
+// /api/state polls (the agent objects are replaced each poll). Mirrors render.js.
+let selectedKey = null;           // the clicked desk (persistent highlight)
+let hoverKey = null;              // the desk under the cursor (transient)
+const keyOf = (a) => a ? (a.sessionId || (a.pid != null ? `pid:${a.pid}` : null)) : null;
+
 function viewportRect() {
   const host = world && world.parentElement; // .floor-frame
   return host ? host.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
@@ -550,20 +560,89 @@ function zoomAt(clientX, clientY, factor) {
   applyCam();
 }
 
-// Map a screen point to a desk cell's agent (or null). The canvas rect already
-// reflects the CSS scale + world translate, so dividing by the effective scale
-// gives buffer-space px.
-function agentAt(clientX, clientY) {
+// Map a screen point to a desk cell (or null). The canvas rect already reflects
+// the CSS scale + world translate, so dividing by the effective scale gives
+// buffer-space px.
+function cellAt(clientX, clientY) {
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
   const eff = UPSCALE * cam.s;
   const bx = (clientX - rect.left) / eff, by = (clientY - rect.top) / eff;
   for (const cell of cells) {
-    if (bx >= cell.x && bx <= cell.x + CELL_W && by >= cell.y && by <= cell.y + CELL_H) {
-      return cell.agent;
-    }
+    if (bx >= cell.x && bx <= cell.x + CELL_W && by >= cell.y && by <= cell.y + CELL_H) return cell;
   }
   return null;
+}
+const agentAt = (clientX, clientY) => { const c = cellAt(clientX, clientY); return c ? c.agent : null; };
+
+// ---- hover affordance + tooltip --------------------------------------------
+// Hovering a desk rings it (handled in draw via hoverKey) and pops a light DOM
+// tooltip of what that agent is doing — render.js's hover-ring + info-card feel,
+// kept minimal (name · project, activity, current task). All fields come from
+// the agent object already in /api/state — no backend dependency.
+let tooltip = null;
+const ACTIVITY_TEXT = { working: 'shipping', shell: 'running a command', idle: 'idle' };
+const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function ensureTooltip() {
+  if (tooltip) return;
+  // position:fixed on <body> → viewport coords straight from getBoundingClientRect,
+  // no offset-parent guesswork; pointer-events:none so it never eats clicks.
+  tooltip = document.createElement('div');
+  tooltip.className = 'proc-tooltip';
+  tooltip.style.cssText =
+    'position:fixed;z-index:30;pointer-events:none;transform:translateX(-50%);' +
+    'padding:4px 7px;border-radius:5px;white-space:nowrap;' +
+    'background:rgba(14,20,32,0.95);border:1px solid rgba(255,255,255,0.22);' +
+    "font:14px 'VT323', ui-monospace, monospace;color:#eef3fb;line-height:1.25;" +
+    'box-shadow:0 4px 14px rgba(0,0,0,0.45);display:none;';
+  document.body.appendChild(tooltip);
+}
+
+function hideTooltip() { if (tooltip) tooltip.style.display = 'none'; }
+
+function showTooltip(cell) {
+  ensureTooltip();
+  const a = cell.agent;
+  const col = statusColor(a.activity);
+  const act = ACTIVITY_TEXT[a.activity] || a.activity || 'idle';
+  const task = a.task || a.chatName || a.lastPrompt || '';
+  tooltip.innerHTML =
+    `<div style="font-weight:600;letter-spacing:.3px">${escHtml(a.name)}` +
+      `<span style="opacity:.55;font-weight:400"> · ${escHtml(a.project)}</span></div>` +
+    '<div style="display:flex;align-items:center;gap:4px;margin-top:1px">' +
+      `<span style="width:6px;height:6px;border-radius:50%;background:${col};` +
+        `box-shadow:${a.activity === 'idle' ? 'none' : `0 0 5px ${col}`}"></span>` +
+      `<span style="color:${col}">${escHtml(act)}</span></div>` +
+    (task ? '<div style="opacity:.85;margin-top:1px;max-width:206px;overflow:hidden;' +
+      `text-overflow:ellipsis">“${escHtml(task)}”</div>` : '');
+  tooltip.style.display = 'block';
+  // anchor above the desk (flip below if cramped), clamped to the viewport
+  const rect = canvas.getBoundingClientRect();
+  const eff = UPSCALE * cam.s;
+  const cx = rect.left + (cell.x + CELL_W / 2) * eff;
+  const topY = rect.top + cell.y * eff;
+  const botY = rect.top + (cell.y + CELL_H) * eff;
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  const left = clampN(cx, tw / 2 + 4, window.innerWidth - tw / 2 - 4);
+  let top = topY - th - 8;
+  if (top < 4) top = botY + 8;
+  tooltip.style.left = Math.round(left) + 'px';
+  tooltip.style.top = Math.round(top) + 'px';
+}
+
+// Recompute the hovered desk from a cursor point: update the cursor, the tooltip,
+// and (only on change) the hover key + an immediate repaint so the ring tracks
+// the cursor without waiting for the slow (~7.5fps) animation tick.
+function updateHover(clientX, clientY) {
+  const cell = cellAt(clientX, clientY);
+  const k = cell ? keyOf(cell.agent) : null;
+  if (canvas) canvas.style.cursor = cell ? 'pointer' : 'grab';
+  if (k === hoverKey) return;
+  hoverKey = k;
+  if (cell) showTooltip(cell); else hideTooltip();
+  draw();
 }
 
 // Attach pan/zoom/click once. A press that doesn't move is a click (select); a
@@ -577,9 +656,10 @@ function attachInput() {
   canvas.addEventListener('mousedown', (e) => {
     down = true; moved = 0; sx = e.clientX; sy = e.clientY;
     canvas.style.cursor = 'grabbing';
+    hoverKey = null; hideTooltip(); // dragging: drop the hover affordance
   });
   window.addEventListener('mousemove', (e) => {
-    if (!down) return;
+    if (!down) { updateHover(e.clientX, e.clientY); return; } // not dragging → hover
     const dx = e.clientX - sx, dy = e.clientY - sy;
     moved += Math.abs(dx) + Math.abs(dy);
     cam.x += dx; cam.y += dy; sx = e.clientX; sy = e.clientY;
@@ -588,16 +668,30 @@ function attachInput() {
   window.addEventListener('mouseup', (e) => {
     if (!down) return;
     down = false; canvas.style.cursor = 'grab';
-    if (moved < 5) {
+    if (moved < 5) { // a clean tap selects; tapping the selected desk deselects
       const agent = agentAt(e.clientX, e.clientY);
-      window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: agent || null } }));
+      const k = keyOf(agent);
+      selectedKey = (k && k === selectedKey) ? null : k;
+      draw(); // paint the selection ring now — don't wait for the slow loop tick
+      window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: selectedKey ? agent : null } }));
     }
+    updateHover(e.clientX, e.clientY); // re-evaluate hover at rest
+  });
+  canvas.addEventListener('mouseleave', () => {
+    if (hoverKey != null) { hoverKey = null; draw(); }
+    hideTooltip(); canvas.style.cursor = 'grab';
   });
   const host = (world && world.parentElement) || canvas;
   host.addEventListener('wheel', (e) => {
     e.preventDefault();
-    if (e.ctrlKey) { // pinch / ⌘ → zoom around the cursor
-      zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.08 : 1 / 1.08);
+    hideTooltip();
+    if (e.ctrlKey || e.metaKey) { // pinch / ⌘ → zoom around the cursor
+      // Magnitude-proportional zoom (ported from render.js:740-741). The old
+      // fixed per-event factor felt hair-trigger on trackpads, which fire many
+      // tiny wheel events; exp(-step·0.01) scales with gesture size. Normalize
+      // line-mode (mouse wheel) deltas to px first. zoomAt still clamps the scale.
+      const step = e.deltaMode !== 0 ? e.deltaY * 16 : e.deltaY;
+      zoomAt(e.clientX, e.clientY, Math.exp(-step * 0.01));
     } else { // plain scroll → pan
       cam.x -= e.deltaX; cam.y -= e.deltaY;
       userMoved = true; clampPan(); applyCam();
@@ -621,7 +715,10 @@ function draw() {
   // Names + repo labels are DOM (see syncLabels), positioned on each setAgents().
   for (const cell of cells) {
     const a = cell.agent;
-    drawCubicle(ctx, cell.x, cell.y, a, frame, false, false);
+    const k = keyOf(a);
+    const selected = k != null && k === selectedKey;
+    const hovered = k != null && k === hoverKey && !selected;
+    drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered);
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
   }
 }

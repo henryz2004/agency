@@ -97,56 +97,12 @@
   flex-direction: column;
   gap: 10px;
 }
-.cp-loading {
-  color: var(--muted);
-  font-size: 16px;
-  padding: 6px 0;
-}
 
-/* transcript messages */
-.cp-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.cp-msg {
-  border: 1px solid var(--line2);
-  border-radius: 6px;
-  padding: 7px 9px;
-  background: var(--card2);
-}
-.cp-msg.user {
-  border-left: 3px solid var(--cyan);
-}
-.cp-msg.assistant {
-  border-left: 3px solid var(--green);
-}
-.cp-msg-role {
-  font-family: var(--pixel);
-  font-size: 7px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--muted2);
-  margin-bottom: 4px;
-}
-.cp-msg.user .cp-msg-role {
-  color: var(--cyan);
-}
-.cp-msg.assistant .cp-msg-role {
-  color: var(--green);
-}
-.cp-msg-text {
-  font-size: 16px;
-  line-height: 1.35;
-  color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* ---- "current task in progress" card (working mode) ---------------------- */
-/* Shown at the top of the panel when the selected agent is WORKING (not waiting
-   on you): a glanceable summary of what it's doing right now. The transcript
-   renders below as supporting context. */
+/* ---- status + metrics card ----------------------------------------------- */
+/* The panel's primary content for any real Claude session (idle OR working): a
+   truthful status badge from the agent's own state, the task it's on, a 30-min
+   activity readout, and — only when a tool is in flight — a live "doing now"
+   line. No conversation dump; just honest status. */
 .cp-activity {
   border: 1px solid var(--line);
   border-left: 3px solid var(--green);
@@ -183,27 +139,29 @@
   font-size: 18px; line-height: 1.3; color: var(--ink);
   overflow-wrap: anywhere;
 }
-/* the live action line: "doing now Editing render.js" */
+/* the headline 30-min activity readout: "⚡ 14 tool calls · 12.3k tokens" */
+.cp-act-metrics {
+  font-size: 15px; line-height: 1.3; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.cp-act-bolt { color: var(--gold); margin-right: 3px; }
+.cp-act-win { color: var(--muted2); }
+.cp-activity.idle .cp-act-metrics { color: var(--muted); }
+
+/* the live action line: "doing now Editing render.js". Empty (collapsed) when
+   no tool is in flight, so an idle agent shows nothing here. */
 .cp-act-now {
   font-size: 16px; line-height: 1.35; color: var(--muted);
   overflow-wrap: anywhere;
 }
+.cp-act-now.cp-act-empty { display: none; }
 .cp-act-label {
   font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
   text-transform: uppercase; color: var(--muted2); margin-right: 5px;
 }
 .cp-act-target { color: var(--cyan); }
-.cp-act-now.cp-act-pending { color: var(--muted2); }
-.cp-act-now.cp-act-pending::after { content: 'reading the transcript…'; }
+.cp-act-now .cp-dim { color: var(--muted2); }
 .cp-act-sub { font-size: 14px; color: #46d6cf; }
-
-/* divider between the activity card and the supporting transcript */
-.cp-section-label {
-  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
-  text-transform: uppercase; color: var(--muted2);
-  margin: 6px 0 -2px; padding-top: 4px;
-  border-top: 1px dotted var(--line2);
-}
 
 /* notes + teammate launch brief */
 .cp-note {

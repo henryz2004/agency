@@ -109,10 +109,26 @@ function onState() {
     console.error('office render failed:', e);
   }
 
+  // ---- topbar headline metrics (truthful definitions) --------------------
+  // ponytail: "on the floor" = count of live agents (anything getLive() returns:
+  // running interactive sessions + active/blocked background agents + teammates).
+  const onFloor = live.agents.length;
+  // ponytail: "shipping now" = agents whose activity is 'working' (the model is
+  // actively generating). 'shell' (running a command) and 'idle' don't count.
+  // This is an instantaneous snapshot, so on a 3s poll it's frequently 0 even
+  // with agents present — true, but it reads dead. We keep it honest by RELABELING
+  // it as a live $/hr burn rate (below) when we can derive one, and otherwise show
+  // the working count under a clearer "generating now" frame.
   const workingCount = live.agents.filter((a) => a.activity === 'working').length;
-  $('tsLive').textContent = live.agents.length;
-  $('tsBusy').textContent = workingCount;
-  $('tsTeams').textContent = (live.teams || []).filter((t) => (t.members || []).length > 1).length;
+  // ponytail: "teams" = distinct projects with a live agent (project = basename of
+  // the agent's cwd). This counts the workspaces currently staffed, not the
+  // collaborative-team records from readTeams() (which were almost always 0).
+  const liveProjects = new Set(live.agents.map((a) => a && a.project).filter(Boolean));
+  $('tsLive').textContent = onFloor;
+  $('tsTeams').textContent = liveProjects.size;
+  updateTopbarBurn(workingCount);
+  // ponytail: track per-agent activity → drives the "just finished / unread" set.
+  updateUnread(live.agents);
   updateSound(workingCount);
   $('emptyBanner').classList.toggle('hidden', live.agents.length > 0);
 
@@ -126,6 +142,153 @@ function onState() {
   renderLedger(usage);
   renderTicker();
 }
+
+// ---- topbar "shipping now" → live burn -----------------------------------
+// The raw "shipping now" count (agents whose model is generating *this instant*)
+// is honest but reads dead: a 3s poll rarely catches the working frame, so it
+// sits at 0 even with a full floor. To make the headline feel ALIVE without
+// inventing anything, we relabel that slot as a live $/hr burn derived from REAL
+// throughput: recentDailyAvgOut() (a 7-day average of output tokens/day, from
+// /api/state) translated through the SAME salary assumptions the payroll meter
+// uses. It's the genuine recent pace expressed as money/hour — the figure the
+// payroll-equivalent meter already shows, surfaced up top.
+//   HARD RULE honored: if there's no recent output (rate would be 0/unknowable)
+// we DON'T fabricate a rate — we fall back to the truthful "generating now"
+// count instead, so the number on screen is always real.
+function topbarBurnPerHour() {
+  if (!STATE || !STATE.usage) return 0;
+  const perEngDay = assume.tok * assume.hrs; // output one engineer ships/workday
+  const avgDailyOut = recentDailyAvgOut(STATE.usage); // real 7-day avg out tok/day
+  const engDaysPerDay = perEngDay > 0 ? avgDailyOut / perEngDay : 0;
+  const dollarsPerWorkday = assume.days > 0 ? assume.sal / assume.days : 0;
+  const dollarsPerDay = engDaysPerDay * dollarsPerWorkday;
+  return Math.max(0, dollarsPerDay / 24); // $/hr (real day → hourly)
+}
+
+function updateTopbarBurn(workingCount) {
+  const valEl = $('tsBusy');
+  const lblEl = $('tsBusyLbl');
+  if (!valEl) return;
+  const burnPerHr = topbarBurnPerHour();
+  // Gate on >=$1/hr, not just >0: money() rounds to whole dollars, so a sub-$1
+  // rate would render a misleading "$0/hr" while still being "non-zero". Below
+  // that we fall back to the truthful count rather than show a fake-looking zero.
+  if (burnPerHr >= 1) {
+    // Real recent-pace burn — show it as the live signal.
+    valEl.textContent = money(burnPerHr) + '/hr';
+    if (lblEl) lblEl.textContent = 'shipping value';
+    valEl.title = 'recent output pace, valued via your salary assumptions';
+  } else {
+    // No recent throughput to value honestly — fall back to the instantaneous
+    // count of agents whose model is generating right now (real, not invented).
+    valEl.textContent = String(workingCount);
+    if (lblEl) lblEl.textContent = 'generating now';
+    valEl.title = 'agents whose model is generating output this instant';
+  }
+}
+
+// ---- "just finished / unread" tracking ------------------------------------
+// When an agent finishes a turn (active → idle) and the user hasn't opened it,
+// it's "unread". We watch per-sessionId activity across polls and only mark
+// unread on an OBSERVED active→idle transition — an agent already idle on first
+// load is NOT unread (no false positives). The set is surfaced as a topbar count
+// and exposed for an on-floor per-desk badge built later in proc-office.js:
+//   - window.agencyUnread        : live Set<sessionId>, refreshed each poll
+//   - 'agency:unread' CustomEvent: { detail: { ids: [...] } }, fired on change
+// Viewing an agent (the existing agency:select event) clears its unread.
+// ponytail: in-memory only for v1; localStorage persistence (so unread survives
+// a refresh) is the upgrade.
+const lastActivity = new Map(); // sessionId -> last seen activity
+const unreadIds = new Set(); // sessionIds that just finished and aren't viewed yet
+window.agencyUnread = unreadIds; // expose for proc-office.js per-desk badge
+
+function isActive(activity) {
+  return activity === 'working' || activity === 'shell';
+}
+
+function emitUnread() {
+  window.dispatchEvent(new CustomEvent('agency:unread', { detail: { ids: [...unreadIds] } }));
+}
+
+function updateUnread(agents) {
+  const present = new Set();
+  let changed = false;
+  for (const a of agents) {
+    const id = a && a.sessionId;
+    if (!id) continue;
+    present.add(id);
+    const prev = lastActivity.get(id);
+    const now = a.activity;
+    // Only an OBSERVED transition counts. `prev === undefined` (first sighting)
+    // never marks unread, so an agent already idle at page open stays read.
+    if (prev !== undefined && isActive(prev) && !isActive(now)) {
+      if (!unreadIds.has(id)) {
+        unreadIds.add(id);
+        changed = true;
+      }
+    }
+    lastActivity.set(id, now);
+  }
+  // Forget agents that left the floor (and drop their stale unread).
+  for (const id of lastActivity.keys()) {
+    if (!present.has(id)) {
+      lastActivity.delete(id);
+      if (unreadIds.delete(id)) changed = true;
+    }
+  }
+  renderUnreadPill();
+  if (changed) emitUnread();
+}
+
+function clearUnread(sessionId) {
+  if (sessionId && unreadIds.delete(sessionId)) {
+    renderUnreadPill();
+    emitUnread();
+  }
+}
+
+let unreadPill = null;
+function ensureUnreadPill() {
+  if (unreadPill) return unreadPill;
+  const stats = document.querySelector('.topstats');
+  if (!stats) return null;
+  unreadPill = document.createElement('button');
+  unreadPill.type = 'button';
+  unreadPill.id = 'unreadPill';
+  unreadPill.className = 'unread-pill hidden';
+  unreadPill.title = 'Agents that just finished a turn you haven’t opened — click to view';
+  const live = stats.querySelector('.live-pill');
+  if (live) stats.insertBefore(unreadPill, live);
+  else stats.appendChild(unreadPill);
+  return unreadPill;
+}
+
+function renderUnreadPill() {
+  const pill = ensureUnreadPill();
+  if (!pill) return;
+  const n = unreadIds.size;
+  if (!n) {
+    pill.classList.add('hidden');
+    return;
+  }
+  pill.classList.remove('hidden');
+  pill.textContent = `✉ ${n} just finished`;
+  pill.onclick = () => {
+    // Open the first unread agent (clears its unread via the agency:select path).
+    const first = unreadIds.values().next().value;
+    const agent = STATE && STATE.live && STATE.live.agents
+      ? STATE.live.agents.find((a) => a && a.sessionId === first)
+      : null;
+    if (agent) window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent } }));
+  };
+}
+
+// Viewing an agent (click on the floor, walk into its desk, or the waiting/unread
+// pill) clears that agent's unread — same event every selection path already fires.
+window.addEventListener('agency:select', (e) => {
+  const agent = e && e.detail && e.detail.agent;
+  if (agent && agent.sessionId) clearUnread(agent.sessionId);
+});
 
 // ---- "needs you" HUD (Control Phase-1) ------------------------------------
 // A non-intrusive pill in the topbar showing how many agents are paused on a
