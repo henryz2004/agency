@@ -120,13 +120,21 @@ function onState() {
   // it as a live $/hr burn rate (below) when we can derive one, and otherwise show
   // the working count under a clearer "generating now" frame.
   const workingCount = live.agents.filter((a) => a.activity === 'working').length;
+  const shellCount = live.agents.filter((a) => a.activity === 'shell').length;
+  const idleCount = onFloor - workingCount - shellCount;
   // ponytail: "teams" = distinct projects with a live agent (project = basename of
   // the agent's cwd). This counts the workspaces currently staffed, not the
   // collaborative-team records from readTeams() (which were almost always 0).
   const liveProjects = new Set(live.agents.map((a) => a && a.project).filter(Boolean));
   $('tsLive').textContent = onFloor;
   $('tsTeams').textContent = liveProjects.size;
-  updateTopbarBurn(workingCount);
+  // Task 2: honest "generating now" count (model actively generating this instant).
+  $('tsGenerating').textContent = workingCount;
+  // Task 1: live token-burn from poll-to-poll deltas of lifetime.out.
+  sampleBurn(usage);
+  updateTopbarBurn();
+  // Task 3 "Now" view panels (live, lightweight).
+  renderNow({ onFloor, workingCount, shellCount, idleCount }, usage);
   // ponytail: track per-agent activity → drives the "just finished / unread" set.
   updateUnread(live.agents);
   updateSound(workingCount);
@@ -144,48 +152,72 @@ function onState() {
   renderTicker();
 }
 
-// ---- topbar "shipping now" → live burn -----------------------------------
-// The raw "shipping now" count (agents whose model is generating *this instant*)
-// is honest but reads dead: a 3s poll rarely catches the working frame, so it
-// sits at 0 even with a full floor. To make the headline feel ALIVE without
-// inventing anything, we relabel that slot as a live $/hr burn derived from REAL
-// throughput: recentDailyAvgOut() (a 7-day average of output tokens/day, from
-// /api/state) translated through the SAME salary assumptions the payroll meter
-// uses. It's the genuine recent pace expressed as money/hour — the figure the
-// payroll-equivalent meter already shows, surfaced up top.
-//   HARD RULE honored: if there's no recent output (rate would be 0/unknowable)
-// we DON'T fabricate a rate — we fall back to the truthful "generating now"
-// count instead, so the number on screen is always real.
-function topbarBurnPerHour() {
-  if (!STATE || !STATE.usage) return 0;
-  const perEngDay = assume.tok * assume.hrs; // output one engineer ships/workday
-  const avgDailyOut = recentDailyAvgOut(STATE.usage); // real 7-day avg out tok/day
-  const engDaysPerDay = perEngDay > 0 ? avgDailyOut / perEngDay : 0;
-  const dollarsPerWorkday = assume.days > 0 ? assume.sal / assume.days : 0;
-  const dollarsPerDay = engDaysPerDay * dollarsPerWorkday;
-  return Math.max(0, dollarsPerDay / 24); // $/hr (real day → hourly)
+// ---- topbar live token-burn ----------------------------------------------
+// The honest "what's happening NOW": a LIVE output-token rate derived from
+// poll-to-poll deltas of usage.lifetime.out (which is MONOTONIC — it never
+// resets, unlike today.out which zeroes at midnight). We keep a short trailing
+// window of {t, out} samples and compute rate = (newest.out - oldest.out) over
+// the elapsed minutes, so it reads ~0 when idle and spikes on a burst — the
+// genuine bursty signal. NO averages, no $-framing here (that moved to the
+// Analytics tab). Guards: a missing/backwards lifetime.out never produces a
+// rate; the FIRST sample (no prior) shows 0, never a phantom spike.
+const BURN_WINDOW_MS = 5 * 60 * 1000; // 5-minute trailing window
+const burnSamples = []; // [{ t: ms, out: lifetime.out }], oldest→newest
+let liveBurnPerMin = 0; // tokens/min over the window (0 = idle/unknown)
+
+function sampleBurn(usage) {
+  const out = usage && usage.lifetime ? usage.lifetime.out : null;
+  // Guard: missing or non-finite lifetime.out — don't record, don't fabricate.
+  if (typeof out !== 'number' || !Number.isFinite(out)) {
+    liveBurnPerMin = 0;
+    return;
+  }
+  const now = Date.now();
+  const prev = burnSamples.length ? burnSamples[burnSamples.length - 1] : null;
+  // Guard: lifetime.out should be monotonic. If it goes BACKWARDS (e.g. a server
+  // restart re-derived a smaller total, or a transient bad read), the window is
+  // no longer a valid baseline — reset to this point and report 0 until we have a
+  // fresh forward delta. This prevents a negative/garbage spike.
+  if (prev && out < prev.out) {
+    burnSamples.length = 0;
+    burnSamples.push({ t: now, out });
+    liveBurnPerMin = 0;
+    return;
+  }
+  burnSamples.push({ t: now, out });
+  // Drop samples older than the window (always keep ≥1 so we have a baseline).
+  while (burnSamples.length > 1 && now - burnSamples[0].t > BURN_WINDOW_MS) {
+    burnSamples.shift();
+  }
+  // First sample ever (no prior) → no delta → 0, never a huge spike.
+  if (burnSamples.length < 2) {
+    liveBurnPerMin = 0;
+    return;
+  }
+  const oldest = burnSamples[0];
+  const newest = burnSamples[burnSamples.length - 1];
+  const minutes = (newest.t - oldest.t) / 60000;
+  const deltaOut = newest.out - oldest.out;
+  liveBurnPerMin = minutes > 0 ? Math.max(0, deltaOut / minutes) : 0;
 }
 
-function updateTopbarBurn(workingCount) {
-  const valEl = $('tsBusy');
-  const lblEl = $('tsBusyLbl');
+function updateTopbarBurn() {
+  const valEl = $('tsBurn');
+  const lblEl = $('tsBurnLbl');
   if (!valEl) return;
-  const burnPerHr = topbarBurnPerHour();
-  // Gate on >=$1/hr, not just >0: money() rounds to whole dollars, so a sub-$1
-  // rate would render a misleading "$0/hr" while still being "non-zero". Below
-  // that we fall back to the truthful count rather than show a fake-looking zero.
-  if (burnPerHr >= 1) {
-    // Real recent-pace burn — show it as the live signal.
-    valEl.textContent = money(burnPerHr) + '/hr';
-    if (lblEl) lblEl.textContent = 'shipping value';
-    valEl.title = 'recent output pace, valued via your salary assumptions';
-  } else {
-    // No recent throughput to value honestly — fall back to the instantaneous
-    // count of agents whose model is generating right now (real, not invented).
-    valEl.textContent = String(workingCount);
-    if (lblEl) lblEl.textContent = 'generating now';
-    valEl.title = 'agents whose model is generating output this instant';
-  }
+  const active = liveBurnPerMin > 0;
+  valEl.innerHTML = `${fmtBurn(liveBurnPerMin)} <span class="tstat-unit">tok/min</span>`;
+  if (lblEl) lblEl.textContent = active ? 'burning now' : 'idle';
+  valEl.title = 'live output-token rate over the last ~5 min (0 when idle)';
+}
+
+// Burn-specific number format: keep one decimal in the k range so "12.4k" reads,
+// but show whole tokens below 1k and never the trailing ".0".
+function fmtBurn(n) {
+  n = n || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(Math.round(n));
 }
 
 // ---- "just finished / unread" tracking ------------------------------------
@@ -330,6 +362,117 @@ function renderWaiting(waiters) {
     const first = waiters.slice().sort((a, b) => (a.pendingSince || 0) - (b.pendingSince || 0))[0];
     if (first) window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: first } }));
   };
+}
+
+// ---- "Now" view (default) -------------------------------------------------
+// The current-activity panels: live token-burn (mirrors the topbar), a
+// working/shell/idle breakdown of the live floor, and recent tool-call activity.
+// Everything here is instantaneous/live — no averages, no $-framing.
+
+function renderNow(counts, usage) {
+  const { onFloor, workingCount, shellCount, idleCount } = counts;
+
+  // Live burn (same figure as the topbar, larger).
+  const burnEl = $('nowBurn');
+  if (burnEl) burnEl.textContent = fmtBurn(liveBurnPerMin);
+  const burnNote = $('nowBurnNote');
+  if (burnNote) {
+    burnNote.textContent = liveBurnPerMin > 0
+      ? 'output tokens / min over the last ~5 min'
+      : 'no output flowing right now · 0 when idle';
+  }
+
+  // Working / shell / idle breakdown of the floor.
+  setText('nowGenerating', workingCount);
+  setText('nowShell', shellCount);
+  setText('nowIdle', Math.max(0, idleCount));
+
+  // Proportional bar (working = green, shell = amber, idle = grey).
+  const bar = $('nowBar');
+  if (bar) {
+    bar.innerHTML = '';
+    const total = onFloor;
+    if (total > 0) {
+      const segs = [
+        ['now-seg-working', workingCount],
+        ['now-seg-shell', shellCount],
+        ['now-seg-idle', Math.max(0, idleCount)],
+      ];
+      for (const [cls, n] of segs) {
+        if (n <= 0) continue;
+        const seg = document.createElement('div');
+        seg.className = 'now-seg ' + cls;
+        seg.style.width = (100 * n) / total + '%';
+        bar.appendChild(seg);
+      }
+    }
+  }
+  const foot = $('nowFoot');
+  if (foot) {
+    foot.textContent = onFloor === 0
+      ? 'No agents on the floor.'
+      : `${onFloor} on the floor · ${workingCount} generating`;
+  }
+
+  renderNowTools(usage);
+}
+
+// Recent tool-call activity: which currently-active workspaces have logged the
+// most tool actions. /api/state carries no per-window tool count, only all-time
+// `tools` and `recentOut` (output within the recency window), so we SCOPE to
+// projects that are live now or shipped recently (honest "currently active") and
+// rank those by their all-time tool actions. Fall back to all-time if nothing is
+// active so the panel never goes blank.
+function renderNowTools(usage) {
+  const list = $('nowToolList');
+  if (!list) return;
+  const liveProjects = new Set(
+    (STATE && STATE.live && STATE.live.agents ? STATE.live.agents : [])
+      .map((a) => a && a.project)
+      .filter(Boolean)
+  );
+  const all = Object.entries(usage.byProject || {}).map(([p, v]) => ({
+    project: p,
+    tools: v.tools || 0,
+    recentOut: v.recentOut || 0,
+  }));
+  // Active = a live agent here now, or output shipped within the recency window.
+  let entries = all.filter((e) => e.recentOut > 0 || liveProjects.has(e.project));
+  let fallback = false;
+  if (!entries.some((e) => e.tools > 0)) {
+    entries = all.filter((e) => e.tools > 0);
+    fallback = true;
+  }
+  entries.sort((a, b) => (b.tools || 0) - (a.tools || 0));
+  entries = entries.slice(0, 5);
+  const max = entries.length ? entries[0].tools || 1 : 1;
+
+  const hint = $('nowToolsHint');
+  if (hint) hint.textContent = fallback ? 'all-time' : `active · last ${usage.recentWindowDays || 7}d`;
+
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.innerHTML = '<div class="dept-empty">No tool activity yet.</div>';
+    return;
+  }
+  for (const e of entries) {
+    const live = liveProjects.has(e.project);
+    const liveTag = live ? '<span class="dept-live" title="an agent is here now">●</span>' : '';
+    const val = e.tools || 0;
+    const barW = max ? (100 * val) / max : 0;
+    const row = document.createElement('div');
+    row.className = 'nowtool-row';
+    row.innerHTML = `
+      <div class="nowtool-head"><span class="nowtool-name">${liveTag}${escapeHtml(e.project)}</span>
+        <span class="nowtool-val">${fmt(val)} actions</span></div>
+      <div class="nowtool-bar"><div class="nowtool-fill" style="width:${barW}%"></div></div>`;
+    list.appendChild(row);
+  }
+}
+
+function setText(id, v) {
+  const el = $(id);
+  if (el) el.textContent = String(v);
 }
 
 // ---- manpower -------------------------------------------------------------
@@ -705,6 +848,51 @@ bindSlider('sTok', 'tok', (v) => comma(v));
 bindSlider('sHrs', 'hrs', (v) => String(v));
 bindSlider('sDays', 'days', (v) => String(v));
 bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
+
+// ---- sidebar view toggle: Now (default) | Analytics ----------------------
+// "Now" = current activity (live burn, generating count, working/idle split,
+// recent tool calls). "Analytics" = the relocated windowed/historical panels
+// (effective team size, eng-years, payroll-equiv + meter, model mix, depts,
+// daily). Default is Now. ponytail: persisted to localStorage; falls back to
+// in-memory if storage is unavailable (private mode / quota).
+(function wireViewToggle() {
+  const nowBtn = $('vtNow');
+  const anaBtn = $('vtAnalytics');
+  const nowView = $('viewNow');
+  const anaView = $('viewAnalytics');
+  if (!nowBtn || !anaBtn || !nowView || !anaView) return;
+
+  function readPref() {
+    try {
+      return localStorage.getItem('agency.view') === 'analytics' ? 'analytics' : 'now';
+    } catch {
+      return 'now';
+    }
+  }
+  function setView(view) {
+    const analytics = view === 'analytics';
+    nowView.classList.toggle('hidden', analytics);
+    anaView.classList.toggle('hidden', !analytics);
+    nowBtn.classList.toggle('active', !analytics);
+    anaBtn.classList.toggle('active', analytics);
+    nowBtn.setAttribute('aria-selected', String(!analytics));
+    anaBtn.setAttribute('aria-selected', String(analytics));
+    try {
+      localStorage.setItem('agency.view', view);
+    } catch {
+      /* in-memory only */
+    }
+    // Analytics has canvases (heads, daily) sized to clientWidth — they render to
+    // 0px while hidden, so re-render on reveal to size them correctly.
+    if (analytics && STATE) {
+      renderManpower();
+      renderDaily(STATE.usage);
+    }
+  }
+  nowBtn.addEventListener('click', () => setView('now'));
+  anaBtn.addEventListener('click', () => setView('analytics'));
+  setView(readPref());
+})();
 
 // ---- sound toggle ---------------------------------------------------------
 // Pref is read at load (no audio yet); the AudioContext is created/resumed only

@@ -66,6 +66,8 @@ html, body {
 /* labels switched from 7px Press Start 2P (near-illegible) to VT323 at a readable
    size with a brighter ink — keeps the terminal vibe, drops the eye strain. */
 .tstat-lbl { font-family: var(--term); font-size: 15px; color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
+/* burn unit ("tok/min") rides smaller next to the live number so the figure leads */
+.tstat-unit { font-size: 15px; color: var(--muted); text-shadow: none; letter-spacing: 0.5px; }
 .live-pill {
   font-family: var(--pixel); font-size: 8px; color: var(--pink); letter-spacing: 2px;
   display: flex; align-items: center; gap: 7px; padding: 6px 10px;
@@ -289,6 +291,52 @@ html, body {
 .card-title { font-family: var(--pixel); font-size: 10px; line-height: 1.4; letter-spacing: 1px; color: var(--cyan); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .card-title-hint { font-family: var(--term); font-size: 15px; color: var(--muted); letter-spacing: 0; text-transform: none; }
 .card-note { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
+/* ---- sidebar Now | Analytics view toggle ---- */
+.view-toggle {
+  display: flex; gap: 4px; padding: 4px;
+  background: #0c111b; border: 1px solid var(--line); border-radius: 8px;
+}
+.vt-btn {
+  flex: 1 1 0; cursor: pointer; padding: 8px 6px;
+  font-family: var(--pixel); font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--muted); background: transparent; border: none; border-radius: 5px;
+  transition: color .15s, background .15s, box-shadow .15s;
+}
+.vt-btn:hover { color: var(--ink); }
+.vt-btn.active {
+  color: #04222e; background: var(--cyan);
+  box-shadow: 0 0 10px rgba(92,208,255,0.35);
+}
+.view-now, .view-analytics { display: flex; flex-direction: column; gap: 12px; }
+.view-now.hidden, .view-analytics.hidden { display: none; }
+
+/* ---- "Now" view cards ---- */
+.now-card { background: linear-gradient(180deg, #102016, #0c1410); border-color: #1d5a3a; }
+.now-card #nowBurn { color: #fff; text-shadow: 0 0 18px rgba(57,217,138,0.55); }
+.now-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; }
+.now-stat { text-align: center; }
+.now-k { font-size: 30px; line-height: 1; color: var(--green); }
+.now-stat:nth-child(2) .now-k { color: #ffb454; }
+.now-stat:nth-child(3) .now-k { color: var(--muted); }
+.now-l { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.1; }
+.now-bar {
+  display: flex; height: 10px; margin-top: 12px; border-radius: 5px; overflow: hidden;
+  background: #0c1119; border: 1px solid var(--line2);
+}
+.now-seg { height: 100%; }
+.now-seg-working { background: var(--green); }
+.now-seg-shell { background: #ffb454; }
+.now-seg-idle { background: #3a4358; }
+.now-foot { font-size: 14px; color: var(--muted); margin-top: 8px; }
+
+/* recent tool calls (Now view) */
+.nowtoollist { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.nowtool-head { display: flex; justify-content: space-between; font-size: 17px; }
+.nowtool-name { color: var(--ink); }
+.nowtool-val { color: var(--gold); }
+.nowtool-bar { height: 7px; background: #0c1119; border-radius: 4px; overflow: hidden; margin-top: 3px; border: 1px solid var(--line2); }
+.nowtool-fill { height: 100%; background: linear-gradient(90deg, #2d8f6f, #39d98a); }
 
 /* headcount card */
 .headcount-card { background: linear-gradient(180deg, #16213a, #101627); border-color: #25406b; }

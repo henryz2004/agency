@@ -27,8 +27,12 @@
         <div class="tstat-lbl">on the floor</div>
       </div>
       <div class="tstat">
-        <div class="tstat-val" id="tsBusy">0</div>
-        <div class="tstat-lbl" id="tsBusyLbl">shipping now</div>
+        <div class="tstat-val" id="tsGenerating">0</div>
+        <div class="tstat-lbl">generating now</div>
+      </div>
+      <div class="tstat">
+        <div class="tstat-val" id="tsBurn">0 <span class="tstat-unit">tok/min</span></div>
+        <div class="tstat-lbl" id="tsBurnLbl">idle</div>
       </div>
       <div class="tstat">
         <div class="tstat-val" id="tsTeams">0</div>
@@ -57,6 +61,38 @@
     </section>
 
     <aside class="panel">
+      <div class="view-toggle" id="viewToggle" role="tablist" aria-label="Sidebar view">
+        <button type="button" class="vt-btn active" id="vtNow" role="tab" aria-selected="true">Now</button>
+        <button type="button" class="vt-btn" id="vtAnalytics" role="tab" aria-selected="false">Analytics</button>
+      </div>
+
+      <!-- ===== NOW: live, current-activity view (default) ===== -->
+      <div class="view-now" id="viewNow">
+        <div class="card now-card">
+          <div class="card-title">Burning now <span class="card-title-hint">live output</span></div>
+          <div class="bignum"><span id="nowBurn">0</span><span class="bignum-unit" id="nowBurnUnit">tok/min</span></div>
+          <div class="card-note" id="nowBurnNote">output tokens over the last 5 min · 0 when idle</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Live floor <span class="card-title-hint" id="nowFloorHint">right now</span></div>
+          <div class="now-stats">
+            <div class="now-stat"><div class="now-k" id="nowGenerating">0</div><div class="now-l">generating</div></div>
+            <div class="now-stat"><div class="now-k" id="nowShell">0</div><div class="now-l">running cmd</div></div>
+            <div class="now-stat"><div class="now-k" id="nowIdle">0</div><div class="now-l">idle</div></div>
+          </div>
+          <div class="now-bar" id="nowBar"></div>
+          <div class="now-foot" id="nowFoot">No agents on the floor.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Recent tool calls <span class="card-title-hint" id="nowToolsHint">last 7d</span></div>
+          <div id="nowToolList" class="nowtoollist"></div>
+        </div>
+      </div>
+
+      <!-- ===== ANALYTICS: windowed / historical view (relocated unchanged) ===== -->
+      <div class="view-analytics hidden" id="viewAnalytics">
       <div class="card headcount-card">
         <div class="card-title">Effective team size</div>
         <div class="bignum"><span id="hcNum">0.0</span><span class="bignum-unit">engineers</span></div>
@@ -114,6 +150,7 @@
         <summary class="card-title">All-time ledger <span class="card-title-hint">lifetime totals</span></summary>
         <div class="ledger" id="ledger"></div>
       </details>
+      </div><!-- /view-analytics -->
     </aside>
 
     <div id="panelHandle" class="panel-handle" title="Show stats">📊</div>
