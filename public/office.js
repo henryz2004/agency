@@ -421,10 +421,10 @@ function ensureLabelWrap() {
   canvas.parentElement.appendChild(labelWrap);
 }
 
-// A clean, LEGIBLE font (JetBrains Mono is the app's readable body face; ui-monospace
-// as the system fallback). Readability beats retro here.
-const NAME_FONT = "16px 'JetBrains Mono', ui-monospace, monospace";
-const REPO_FONT = "14px 'JetBrains Mono', ui-monospace, monospace";
+// The body face: Pixelify Sans — a LEGIBLE pixel font (readable retro), with
+// ui-monospace as the system fallback. Keeps pixel character without the eye strain.
+const NAME_FONT = "12px 'Pixelify Sans', ui-monospace, monospace";
+const REPO_FONT = "12px 'Pixelify Sans', ui-monospace, monospace";
 
 function statusColor(act) {
   return act === 'working' ? '#39d98a' : act === 'shell' ? '#ffb454' : '#5a6478';
@@ -498,7 +498,7 @@ function syncLabels() {
       // rug's top strip so the team name reads as woven into the fabric.
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:600 13px 'JetBrains Mono', ui-monospace, monospace;letter-spacing:0.8px;" +
+        "font:600 11px 'Pixelify Sans', ui-monospace, monospace;letter-spacing:0.8px;" +
         'color:#f3ead2;text-align:center;' +
         'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
@@ -526,7 +526,7 @@ function syncLabels() {
       el = document.createElement('div');
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:11px 'JetBrains Mono', ui-monospace, monospace;color:#9fb3cf;" +
+        "font:10px 'Pixelify Sans', ui-monospace, monospace;color:#9fb3cf;" +
         'text-shadow:0 1px 2px rgba(0,0,0,0.65);';
       labelWrap.appendChild(el);
       leadNodes[i] = el;
@@ -559,7 +559,7 @@ function syncHiddenChip() {
       'appearance:none;-webkit-appearance:none;outline:none;' +
       'padding:3px 9px;border-radius:11px;white-space:nowrap;' +
       'background:rgba(14,20,32,0.9);border:1px solid rgba(255,255,255,0.22);' +
-      "font:13px 'JetBrains Mono', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
+      "font:12px 'Pixelify Sans', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
     hiddenChip.addEventListener('click', () => { showHidden = !showHidden; rebuild(); });
     host.appendChild(hiddenChip);
   }
@@ -698,7 +698,7 @@ function ensureTooltip() {
     'position:fixed;z-index:30;pointer-events:none;transform:translateX(-50%);' +
     'padding:4px 7px;border-radius:5px;white-space:nowrap;' +
     'background:rgba(14,20,32,0.95);border:1px solid rgba(255,255,255,0.22);' +
-    "font:14px 'JetBrains Mono', ui-monospace, monospace;color:#eef3fb;line-height:1.25;" +
+    "font:13px 'Pixelify Sans', ui-monospace, monospace;color:#eef3fb;line-height:1.25;" +
     'box-shadow:0 4px 14px rgba(0,0,0,0.45);display:none;';
   document.body.appendChild(tooltip);
 }

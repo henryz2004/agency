@@ -745,7 +745,7 @@ function renderDaily(usage) {
   });
   // baseline + max label
   ctx.fillStyle = '#5b6478';
-  ctx.font = '11px "JetBrains Mono", monospace';
+  ctx.font = '11px "Pixelify Sans", monospace';
   ctx.fillText(`peak ${fmt(max)} tok`, 2, cssH - 1);
   ctx.textAlign = 'right';
   ctx.fillText(`${days.length}d`, cssW - 2, cssH - 1);
