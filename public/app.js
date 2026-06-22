@@ -140,7 +140,6 @@ function onState() {
   renderDepts(usage);
   renderDaily(usage);
   renderLedger(usage);
-  renderTicker();
 }
 
 // ---- topbar live token-burn ----------------------------------------------
@@ -746,7 +745,7 @@ function renderDaily(usage) {
   });
   // baseline + max label
   ctx.fillStyle = '#5b6478';
-  ctx.font = '11px VT323, monospace';
+  ctx.font = '11px "JetBrains Mono", monospace';
   ctx.fillText(`peak ${fmt(max)} tok`, 2, cssH - 1);
   ctx.textAlign = 'right';
   ctx.fillText(`${days.length}d`, cssW - 2, cssH - 1);
@@ -772,59 +771,6 @@ function renderLedger(usage) {
   el.innerHTML = rows
     .map(([k, v]) => `<div class="ledger-row"><span>${k}</span><b>${v}</b></div>`)
     .join('');
-}
-
-// ---- ticker ---------------------------------------------------------------
-
-function fmtUptimeShort(ms) {
-  if (ms == null) return '';
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return h > 0 ? `${h}h${m}m` : `${m}m`;
-}
-
-function renderTicker() {
-  const { live, usage } = STATE;
-  const items = [];
-  for (const a of live.agents) {
-    const ml = a.model ? shortModel(a.model) : '?';
-    const name = escapeHtml(a.name);
-    const proj = escapeHtml(a.project);
-    const labelText = a.task || a.chatName || a.lastPrompt;
-    const label = labelText ? `"${escapeHtml(labelText)}"` : '';
-    const up = fmtUptimeShort(a.uptimeMs);
-    const subN = (a.subagents || []).length;
-    const sub = subN ? ` · 🤖 ${subN} subagent${subN > 1 ? 's' : ''}` : '';
-    const src = a.source === 'opencode' ? ' · opencode' : a.source === 'codex' ? ' · codex' : '';
-    if (a.activity === 'working') {
-      items.push(`🟢 <b>${name}</b>${src} (${escapeHtml(a.title)}) shipping in <b>${proj}</b>${label ? ` — ${label}` : ''} · ${ml}${sub} · up ${up}`);
-    } else if (a.activity === 'shell') {
-      items.push(`⚙ <b>${name}</b>${src} running a command in <b>${proj}</b>${label ? ` — ${label}` : ''}${sub} · up ${up}`);
-    } else if (a.state === 'done') {
-      items.push(`✅ <b>${name}</b>${src} finished${label ? ` ${label}` : ''} in ${proj} · up ${up}`);
-    } else {
-      items.push(`💤 <b>${name}</b>${src} idle in ${proj}${label ? ` — ${label}` : ''}${sub} · up ${up}`);
-    }
-  }
-  // Busiest department: prefer the busiest *currently-active* workspace (by
-  // recent output) so the ticker celebrates what's live, not a long-dead repo;
-  // fall back to all-time if nothing is recent.
-  const projEntries = Object.entries(usage.byProject || {});
-  const topRecent = projEntries
-    .filter(([, v]) => (v.recentOut || 0) > 0)
-    .sort((a, b) => (b[1].recentOut || 0) - (a[1].recentOut || 0))[0];
-  const top = topRecent || projEntries.sort((a, b) => b[1].out - a[1].out)[0];
-  const topVal = topRecent ? top[1].recentOut : top && top[1].out;
-  items.push(`📊 ${fmt(usage.lifetime.out)} output tokens shipped all-time`);
-  items.push(`🤖 ${comma(usage.lifetime.agents)} subagents dispatched across ${comma(usage.lifetime.sessions)} sessions`);
-  if (top) items.push(`🏆 busiest department: <b>${escapeHtml(top[0])}</b> (${fmt(topVal)})`);
-  items.push(`📅 ${usage.activeDays} days on the job since ${usage.firstDay || '—'}`);
-
-  const track = $('tickerTrack');
-  const html = items.map((t) => `<span class="tick">${t}</span>`).join('<span class="tick-sep">◆</span>');
-  // duplicate for seamless marquee
-  track.innerHTML = html + '<span class="tick-sep">◆</span>' + html;
 }
 
 // ---- utils ----------------------------------------------------------------

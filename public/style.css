@@ -13,7 +13,7 @@
   --gold: #ffd166;
   --pink: #ff5cba;
   --pixel: 'Press Start 2P', ui-monospace, monospace;
-  --term: 'VT323', ui-monospace, Menlo, monospace;
+  --term: 'JetBrains Mono', ui-monospace, Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -63,8 +63,8 @@ html, body {
 .topstats { display: flex; align-items: center; gap: 26px; }
 .tstat { text-align: center; }
 .tstat-val { font-size: 30px; line-height: 1; color: var(--green); text-shadow: 0 0 10px rgba(57,217,138,0.4); }
-/* labels switched from 7px Press Start 2P (near-illegible) to VT323 at a readable
-   size with a brighter ink — keeps the terminal vibe, drops the eye strain. */
+/* labels switched from 7px Press Start 2P (near-illegible) to a readable mono
+   (JetBrains Mono) with a brighter ink — keeps the terminal vibe, drops the eye strain. */
 .tstat-lbl { font-family: var(--term); font-size: 15px; color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
 /* burn unit ("tok/min") rides smaller next to the live number so the figure leads */
 .tstat-unit { font-size: 15px; color: var(--muted); text-shadow: none; letter-spacing: 0.5px; }
@@ -210,19 +210,6 @@ html, body {
 }
 .empty-banner code { color: var(--green); background: #0c1119; padding: 1px 6px; border-radius: 3px; }
 .hidden { display: none; }
-
-/* ---- ticker ---- */
-.ticker {
-  flex: 0 0 auto; height: 34px; overflow: hidden; position: relative;
-  background: #0c111b; border: 1px solid var(--line); border-radius: 6px;
-  display: flex; align-items: center;
-}
-.ticker-track { display: inline-flex; align-items: center; white-space: nowrap; gap: 0; will-change: transform; animation: marquee 60s linear infinite; }
-.ticker:hover .ticker-track { animation-play-state: paused; }
-.tick { font-size: 17px; color: var(--ink); padding: 0 14px; }
-.tick b { color: var(--gold); }
-.tick-sep { color: var(--muted2); }
-@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 /* ---- side panel (hovering overlay, collapsible) ---- */
 .panel {

@@ -207,13 +207,15 @@ function actionsFor(a, transcript) {
       ? `cd ${a.cwd} && claude agents --cwd ${a.cwd}`
       : (transcript && transcript.resumeCmd) || `cd ${a.cwd} && claude --resume ${a.sessionId}`;
   if (a.role !== 'teammate' && a.source === 'claude' && a.sessionId && a.cwd && resumeCmd) {
-    // Honest framing: a live background agent has no direct chat to open and no
-    // attach-by-id (the CLI only offers the `claude agents` picker). Interactive
-    // sessions resume straight into the conversation.
+    // "Background agent" isn't a meaningful category — it's just an agent in agent
+    // mode, and it IS reachable. Frame by the SPAWN relationship (was it spawned by
+    // someone?), never as inaccessible. The terminal button below is the jump-in.
     const note = document.createElement('div');
     note.className = 'cp-action-note';
     note.textContent = bg
-      ? "Background agent — can't open its chat directly. This opens the claude agents window so you can find it."
+      ? a.leadName
+        ? `Spawned by ${a.leadName} — part of their run.`
+        : 'Running in agent mode.'
       : 'Resume this session to read or message it.';
     wrap.appendChild(note);
     const row = document.createElement('div');
@@ -240,7 +242,7 @@ function openTerminalButton(a) {
   b.className = 'cp-open';
   b.textContent = bg ? 'Attach in Terminal ▶' : 'Open in Terminal ▶';
   b.title = bg
-    ? 'Open a terminal and attach to this running background agent (claude agents)'
+    ? 'Open a terminal and attach to this running agent (claude agents)'
     : 'Open a terminal running claude --resume for this agent';
   b.addEventListener('click', () => {
     const prev = b.textContent;
@@ -485,7 +487,7 @@ function renderReplyBox(agent) {
   const head = document.createElement('div');
   head.className = 'cp-reply-head';
   head.innerHTML =
-    '<span class="cp-reply-dot"></span> Paused — waiting on you. Reply to resume it.';
+    '<span class="cp-reply-dot"></span> Waiting on your input. Reply to resume it.';
   wrap.appendChild(head);
 
   // Show the agent's parting question only when we actually have it
@@ -594,11 +596,9 @@ function show(agent) {
   // ---- in-process teammate: no transcript, show its launch brief ----------
   if (agent.role === 'teammate' || agent.kind === 'teammate') {
     bodyEl.innerHTML = '';
+    const lead = agent.leadName ? esc(agent.leadName) : 'its lead';
     bodyEl.appendChild(
-      renderNote(
-        'In-process teammate — runs inside its lead\'s session, so it has no ' +
-          'transcript of its own. Its launch brief:'
-      )
+      renderNote(`Spawned by ${lead} — part of their run. Its launch brief:`)
     );
     const brief = agent.lastPrompt || agent.prompt;
     if (brief) {
@@ -613,6 +613,13 @@ function show(agent) {
     // customizeControls self-gates and returns null for ones without it.
     const cust = customizeControls(agent);
     if (cust) bodyEl.appendChild(cust);
+    // Reach path: a teammate runs INSIDE its lead's session, so jumping in =
+    // opening the lead. Reuse actionsFor with a lead-targeted pseudo-agent.
+    if (agent.leadSessionId && agent.cwd) {
+      const leadAgent = { ...agent, sessionId: agent.leadSessionId, kind: 'interactive', role: null, source: 'claude' };
+      const acts = actionsFor(leadAgent, null);
+      if (acts) bodyEl.appendChild(acts);
+    }
     return;
   }
 

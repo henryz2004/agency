@@ -6,7 +6,7 @@
 import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
-  drawWall, drawFloor, drawDaylight,
+  drawWall, drawFloor, drawDaylight, moodForHour,
   drawCubicle, drawCrown, drawNeedsYou, CELL_W, CELL_H,
 } from './sprites.js';
 
@@ -340,7 +340,7 @@ function drawDog(x, y) {
 }
 
 // ---- ceiling pendant lights pooling warmth over each cluster ----------------
-function drawCeilingLights() {
+function drawCeilingLights(glow = 0) {
   const py = TOP + 3;
   // a service pipe across the top of the floor
   px(ctx, 0, py, bufW, 3, '#b8493d');
@@ -353,8 +353,10 @@ function drawCeilingLights() {
   for (const a of anchors) {
     const cx = Math.round(a.cx);
     const grad = ctx.createRadialGradient(cx, a.py, 2, cx, a.py, Math.max(28, a.pool));
-    grad.addColorStop(0, 'rgba(255,224,150,0.16)');
-    grad.addColorStop(0.7, 'rgba(255,224,150,0.04)');
+    // pendant pools glow stronger as it gets dark (glow rises dusk→night), so the
+    // interior reads warmly lit at night without washing out daytime.
+    grad.addColorStop(0, `rgba(255,224,150,${(0.16 + glow * 0.26).toFixed(3)})`);
+    grad.addColorStop(0.7, `rgba(255,224,150,${(0.04 + glow * 0.08).toFixed(3)})`);
     grad.addColorStop(1, 'rgba(255,224,150,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(cx - a.pool, a.py - a.h / 2, a.pool * 2, a.h);
@@ -403,6 +405,15 @@ function drawClusterRugs() {
 // overlays the canvas exactly. Inline styles only — we don't own index.html/css.
 function ensureLabelWrap() {
   if (labelWrap || !canvas || !canvas.parentElement) return;
+  // inject the unread-pip pulse keyframe once (scoped <style>; we don't own css)
+  if (!document.getElementById('proc-kf')) {
+    const s = document.createElement('style');
+    s.id = 'proc-kf';
+    s.textContent =
+      '@keyframes procUnreadPulse{0%,100%{box-shadow:0 0 3px 1px rgba(255,92,186,0.9);transform:scale(1)}' +
+      '50%{box-shadow:0 0 11px 4px rgba(255,92,186,0.95);transform:scale(1.32)}}';
+    document.head.appendChild(s);
+  }
   labelWrap = document.createElement('div');
   labelWrap.className = 'proc-label-layer';
   labelWrap.style.cssText =
@@ -410,10 +421,10 @@ function ensureLabelWrap() {
   canvas.parentElement.appendChild(labelWrap);
 }
 
-// A clean, LEGIBLE font (VT323 is the app's readable terminal face; ui-monospace
+// A clean, LEGIBLE font (JetBrains Mono is the app's readable body face; ui-monospace
 // as the system fallback). Readability beats retro here.
-const NAME_FONT = "16px 'VT323', ui-monospace, monospace";
-const REPO_FONT = "14px 'VT323', ui-monospace, monospace";
+const NAME_FONT = "16px 'JetBrains Mono', ui-monospace, monospace";
+const REPO_FONT = "14px 'JetBrains Mono', ui-monospace, monospace";
 
 function statusColor(act) {
   return act === 'working' ? '#39d98a' : act === 'shell' ? '#ffb454' : '#5a6478';
@@ -455,8 +466,9 @@ function syncLabels() {
       const pip = document.createElement('span');
       pip.dataset.role = 'pip';
       pip.style.cssText =
-        'position:absolute;top:-4px;right:-4px;width:6px;height:6px;border-radius:50%;' +
-        'background:#ff5cba;box-shadow:0 0 6px #ff5cba;display:none;';
+        'position:absolute;top:-5px;right:-5px;width:9px;height:9px;border-radius:50%;' +
+        'background:#ff5cba;border:1px solid #fff0fa;' +
+        'animation:procUnreadPulse 1.15s ease-in-out infinite;display:none;';
       el.appendChild(dot); el.appendChild(name); el.appendChild(pip);
       labelWrap.appendChild(el);
       nameNodes[i] = el;
@@ -486,7 +498,7 @@ function syncLabels() {
       // rug's top strip so the team name reads as woven into the fabric.
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:600 13px 'VT323', ui-monospace, monospace;letter-spacing:0.8px;" +
+        "font:600 13px 'JetBrains Mono', ui-monospace, monospace;letter-spacing:0.8px;" +
         'color:#f3ead2;text-align:center;' +
         'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
@@ -514,7 +526,7 @@ function syncLabels() {
       el = document.createElement('div');
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:11px 'VT323', ui-monospace, monospace;color:#9fb3cf;" +
+        "font:11px 'JetBrains Mono', ui-monospace, monospace;color:#9fb3cf;" +
         'text-shadow:0 1px 2px rgba(0,0,0,0.65);';
       labelWrap.appendChild(el);
       leadNodes[i] = el;
@@ -547,7 +559,7 @@ function syncHiddenChip() {
       'appearance:none;-webkit-appearance:none;outline:none;' +
       'padding:3px 9px;border-radius:11px;white-space:nowrap;' +
       'background:rgba(14,20,32,0.9);border:1px solid rgba(255,255,255,0.22);' +
-      "font:13px 'VT323', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
+      "font:13px 'JetBrains Mono', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
     hiddenChip.addEventListener('click', () => { showHidden = !showHidden; rebuild(); });
     host.appendChild(hiddenChip);
   }
@@ -686,7 +698,7 @@ function ensureTooltip() {
     'position:fixed;z-index:30;pointer-events:none;transform:translateX(-50%);' +
     'padding:4px 7px;border-radius:5px;white-space:nowrap;' +
     'background:rgba(14,20,32,0.95);border:1px solid rgba(255,255,255,0.22);' +
-    "font:14px 'VT323', ui-monospace, monospace;color:#eef3fb;line-height:1.25;" +
+    "font:14px 'JetBrains Mono', ui-monospace, monospace;color:#eef3fb;line-height:1.25;" +
     'box-shadow:0 4px 14px rgba(0,0,0,0.45);display:none;';
   document.body.appendChild(tooltip);
 }
@@ -706,6 +718,8 @@ function showTooltip(cell) {
       `<span style="width:6px;height:6px;border-radius:50%;background:${col};` +
         `box-shadow:${a.activity === 'idle' ? 'none' : `0 0 5px ${col}`}"></span>` +
       `<span style="color:${col}">${escHtml(act)}</span></div>` +
+    (a.model ? `<div style="opacity:.6;margin-top:1px;font-size:12px">` +
+      `${escHtml(String(a.model).replace(/^claude-/, ''))}</div>` : '') +
     (task ? '<div style="opacity:.85;margin-top:1px;max-width:206px;overflow:hidden;' +
       `text-overflow:ellipsis">“${escHtml(task)}”</div>` : '');
   tooltip.style.display = 'block';
@@ -799,10 +813,11 @@ function attachInput() {
 // ---- scene -----------------------------------------------------------------
 function draw() {
   ctx.clearRect(0, 0, bufW, bufH);
-  drawWall(ctx, bufW, WALL_H, frame);
+  const mood = moodForHour(new Date().getHours()); // time-of-day mood (browser-local)
+  drawWall(ctx, bufW, WALL_H, frame, mood);
   drawFloor(ctx, bufW, TOP, bufH);
-  drawDaylight(ctx, bufW, TOP, bufH);
-  drawCeilingLights();
+  drawDaylight(ctx, bufW, TOP, bufH, mood);
+  drawCeilingLights(mood.glow);
   drawDecor();
   drawClusterRugs();
   // cubicles (cells already in row-major order, so later rows overlap earlier).

@@ -113,10 +113,30 @@ const SHIRTS = ['#d9694f', '#5d9ce0', '#5dc98a', '#e0b05d', '#a87de0', '#5dc9c9'
 // of the canvas) with a wood rail, windows looking out on blue sky, a wall clock,
 // framed pictures, and a glass whiteboard — all procedural.
 // `wallH` is the full wall band height (the floor begins at y = wallH).
-export function drawWall(ctx, bufW, wallH, frame) {
+// ---- time-of-day mood ------------------------------------------------------
+// The office mood shifts with the user's LOCAL hour: soft dawn, bright midday,
+// warm dusk, dark-blue night. Each mood tints the wall plaster, the window sky,
+// the ambient floor wash, and how strongly the interior pendant lights read.
+// Night is kept READABLE — only the empty floor + walls darken; the team rugs
+// and desks are drawn ON TOP of the wash, so they stay full color. office.js
+// reads the clock (new Date() — fine client-side) and passes the mood in.
+export const MOODS = {
+  dawn:  { wall: '#e7dde0', sky: ['#c7a8d8', '#f3ccc2'], wash: ['rgba(255,206,196,0.16)', 'rgba(255,222,206,0.05)', 'rgba(48,30,40,0.16)'], glow: 0.35 },
+  day:   { wall: '#efe6d4', sky: ['#7fc0f0', '#a9d8f7'], wash: ['rgba(255,238,200,0.16)', 'rgba(255,238,200,0.03)', 'rgba(40,22,6,0.14)'], glow: 0.0 },
+  dusk:  { wall: '#e4cdb2', sky: ['#f3a05e', '#f8cf94'], wash: ['rgba(255,165,85,0.20)', 'rgba(255,150,95,0.06)', 'rgba(58,24,12,0.24)'], glow: 0.6 },
+  night: { wall: '#3a3f55', sky: ['#16223f', '#283a5e'], wash: ['rgba(28,42,82,0.34)', 'rgba(22,32,62,0.22)', 'rgba(8,12,30,0.42)'], glow: 1.0 },
+};
+export function moodForHour(h) {
+  if (h >= 6 && h < 9) return MOODS.dawn;
+  if (h >= 9 && h < 17) return MOODS.day;
+  if (h >= 17 && h < 20) return MOODS.dusk;
+  return MOODS.night; // 20:00–06:00
+}
+
+export function drawWall(ctx, bufW, wallH, frame, mood = MOODS.day) {
   // --- plaster wall fills the band from the top ---
   const wy = 0;
-  ctx.fillStyle = '#efe6d4';
+  ctx.fillStyle = mood.wall;
   ctx.fillRect(0, wy, bufW, wallH);
   // soft horizontal paneling lines (very faint) for texture
   ctx.fillStyle = 'rgba(150,120,80,0.05)';
@@ -133,7 +153,7 @@ export function drawWall(ctx, bufW, wallH, frame) {
   for (let x = 40, k = 0; x < bufW - 40; x += 64, k++) {
     // leave a gap mid-wall for the clock + board
     if (x > bufW * 0.38 && x < bufW * 0.58) continue;
-    drawWindow(ctx, x, winY, winW, winH, frame);
+    drawWindow(ctx, x, winY, winW, winH, frame, mood.sky);
   }
   // wall clock high-centre
   drawClock(ctx, Math.round(bufW * 0.46), wy + 16, frame);
@@ -152,13 +172,13 @@ export function drawWall(ctx, bufW, wallH, frame) {
   ctx.fillRect(0, wy + wallH - 3, bufW, 3); // baseboard
 }
 
-function drawWindow(ctx, x, y, w, h, frame) {
+function drawWindow(ctx, x, y, w, h, frame, sky = ['#7fc0f0', '#a9d8f7']) {
   // frame
   px(ctx, x - 1, y - 1, w + 2, h + 2, '#3a4a63');
-  // sky glass with a soft gradient + a diagonal glare streak
+  // sky glass with a soft gradient + a diagonal glare streak (tinted by time of day)
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, '#7fc0f0');
-  g.addColorStop(1, '#a9d8f7');
+  g.addColorStop(0, sky[0]);
+  g.addColorStop(1, sky[1]);
   ctx.fillStyle = g;
   ctx.fillRect(x, y, w, h);
   // glare
@@ -243,11 +263,11 @@ export function drawFloor(ctx, bufW, top, bufH) {
 }
 
 // Soft warm daylight wash from the windows fading toward the front.
-export function drawDaylight(ctx, bufW, top, bufH) {
+export function drawDaylight(ctx, bufW, top, bufH, mood = MOODS.day) {
   const g = ctx.createLinearGradient(0, top, 0, bufH);
-  g.addColorStop(0, 'rgba(255,238,200,0.16)');
-  g.addColorStop(0.5, 'rgba(255,238,200,0.03)');
-  g.addColorStop(1, 'rgba(40,22,6,0.14)');
+  g.addColorStop(0, mood.wash[0]);
+  g.addColorStop(0.5, mood.wash[1]);
+  g.addColorStop(1, mood.wash[2]);
   ctx.fillStyle = g;
   ctx.fillRect(0, top, bufW, bufH - top);
 }
@@ -264,7 +284,6 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   const shirt = SHIRTS[Math.floor(vr() * SHIRTS.length)];
   const hairStyle = Math.floor(vr() * 4);
   const glasses = vr() < 0.3;
-  const headphones = vr() < 0.22;
   const beard = vr() < 0.22;
 
   const typing = activity === 'working';
@@ -311,16 +330,7 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   }
   if (beard) px(ctx, cx - 5, fy + 7, 11, 3, shade(skin, -48));
   px(ctx, cx - 1, fy + 8, 3, 1, shade(skin, -30)); // mouth
-  if (headphones) {
-    // over-ear cups beside the face + a slim 1px band hugging the crown with a
-    // top highlight, so it reads as headphones — not a flat dark bar over the hair
-    px(ctx, cx - 8, fy + 1, 2, 6, '#2b2f38'); // left cup
-    px(ctx, cx - 8, fy + 2, 1, 4, '#454b55');  // left cup sheen
-    px(ctx, cx + 6, fy + 1, 2, 6, '#2b2f38'); // right cup
-    px(ctx, cx + 7, fy + 2, 1, 4, '#1d2026');  // right cup shade
-    px(ctx, cx - 6, hy - 1, 12, 1, '#2b2f38'); // crown band (slim)
-    px(ctx, cx - 5, hy - 2, 10, 1, '#454b55');  // band highlight, just above
-  }
+  // (no hats/headphones — workers wear hair only, per the no-hats decision)
   // neck
   px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14));
 
@@ -357,16 +367,16 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
   const cx = x + CELL_W / 2;
   const idle = agent.activity === 'idle';
 
-  // --- the seated worker (head clears the desk, body behind it) --- dim when
-  // idle so active desks pop and idle ones visibly recede on a glance-scan
-  if (idle) ctx.globalAlpha = 0.5;
+  // --- the seated worker + their personal props --- idle reads as a powered-down
+  // workstation: DESATURATE (grayscale + slight dim) rather than the old
+  // translucency, which looked like a render glitch. Active desks stay full color
+  // so they pop on a glance-scan.
+  if (idle) ctx.filter = 'grayscale(1) brightness(0.82)';
   drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame });
-  ctx.globalAlpha = 1;
-
-  // --- a pinned flag floating just above the monitor (cozy personalization) ---
+  // a pinned flag + sticky-note cluster (personalization) — muted too when idle
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
-  // a sticky-note cluster on the other shoulder
   drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
+  if (idle) ctx.filter = 'none';
 
   // --- wood desk surface across the cell ---
   const dx = x + DIV_W, dw = CELL_W - DIV_W * 2;
