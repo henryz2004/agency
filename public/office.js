@@ -1,14 +1,14 @@
-// proc-office.js — the fully-procedural office: lays mock agents into project
-// desk clusters interleaved with cozy decor zones (lounge, meeting table, kitchen
-// counter, plant beds, pets), then composites the whole scene. Renders into a
-// buffer canvas that the page scales up crisply.
+// office.js — the fully-procedural office (the app's sole renderer): lays mock
+// agents into project desk clusters interleaved with cozy decor zones (lounge,
+// meeting table, kitchen counter, plant beds, pets), then composites the whole
+// scene. Renders into a buffer canvas that the page scales up crisply.
 
 import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
   drawWall, drawFloor, drawDaylight,
   drawCubicle, drawCrown, drawNeedsYou, CELL_W, CELL_H,
-} from './proc-sprites.js';
+} from './sprites.js';
 
 const WALL_H = 70;                 // cream wall band; fills from the top of canvas
 const TOP = WALL_H;                // floor starts here (no sky)
@@ -392,9 +392,9 @@ function drawClusterRugs() {
 }
 
 // ---- DOM label overlay (real crisp text) ------------------------------------
-// Name chips + repo labels are HTML, not canvas pixels — the sheet office at
-// :4313 does the same (sharp DOM text scaled by the camera), which is far more
-// legible than any bitmap font at this buffer resolution. The wrapper is sized
+// Name chips + repo labels are HTML, not canvas pixels — sharp DOM text scaled
+// by the camera, which is far more legible than any bitmap font at this buffer
+// resolution. The wrapper is sized
 // in BUFFER coords and scaled by UPSCALE, so node positions reuse the same
 // cell/cluster coords the canvas art uses. Nodes are pooled and reused between
 // updates so nothing leaks. A future camera can transform `labelWrap` as a group.
@@ -561,21 +561,31 @@ function syncHiddenChip() {
 }
 
 // ---- camera: pan / zoom / click-to-select -----------------------------------
-// proc reuses the sheet office's existing `.world` wrapper (absolute, origin 0,0,
-// the canvas's parent). Pan = a translate on `.world` so the canvas AND the DOM
-// label group (both children of `.world`) move together. Zoom scales the canvas
-// crisply via CSS width (a transform-scale on the canvas would blur it, per
-// render.js) and the label group by a matching factor. A click (a press with no
-// drag) hit-tests the desk cells and dispatches the same `agency:select` event
-// the sheet renderer + chat panel already use.
+// The office uses a `.world` wrapper (absolute, origin 0,0, the canvas's parent).
+// Pan = a translate on `.world` so the canvas AND the DOM label group (both
+// children of `.world`) move together. Zoom scales the canvas crisply via CSS
+// width (a transform-scale on the canvas would blur it) and the label group by a
+// matching factor. A click (a press with no drag) hit-tests the desk cells and
+// dispatches the `agency:select` event the chat panel listens for.
 let world = null;
 let recenterBtn = null;           // shared #recenter button (CSS hides it until .show)
 const cam = { x: 0, y: 0, s: 1 }; // s multiplies the UPSCALE base
 let userMoved = false;            // once the user pans/zooms, stop auto-fitting
+let reservedRight = 0;            // px reserved on the right for the hovering panel
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+// ui.js calls this when the stats panel opens/closes/resizes so the office fits
+// in the free area LEFT of the panel (0 when collapsed). fitView() subtracts it
+// from the available width; re-fit unless the user has taken over the camera.
+export function setReservedRight(px) {
+  reservedRight = Math.max(0, px || 0);
+  if (!canvas) return; // office not initialized yet
+  if (!userMoved) fitView();
+  else { clampPan(); applyCam(); }
+}
+
 // Selection + hover, tracked by a STABLE key so the selection survives the 3s
-// /api/state polls (the agent objects are replaced each poll). Mirrors render.js.
+// /api/state polls (the agent objects are replaced each poll).
 let selectedKey = null;           // the clicked desk (persistent highlight)
 let hoverKey = null;              // the desk under the cursor (transient)
 const keyOf = (a) => a ? (a.sessionId || (a.pid != null ? `pid:${a.pid}` : null)) : null;
@@ -601,7 +611,7 @@ function applyCam() {
   }
   if (world) world.style.transform = `translate(${Math.round(cam.x)}px, ${Math.round(cam.y)}px)`;
   // CSS hides #recenter until .show; reveal it once the user has panned/zoomed
-  // (mirrors render.js), so the affordance isn't permanently invisible in proc mode.
+  // so the affordance isn't permanently invisible.
   if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
 }
 
@@ -613,14 +623,16 @@ function clampPan() {
   cam.y = clampN(cam.y, KEEP - h, vp.height - KEEP);
 }
 
-// Fit the whole office into the floor-frame, centered. Capped at the native 3x
-// so a small floor isn't over-magnified.
+// Fit the whole office into the floor-frame, centered in the free area LEFT of
+// the hovering stats panel (reservedRight). Capped at the native 3x so a small
+// floor isn't over-magnified.
 function fitView() {
   const vp = viewportRect();
-  const fitS = Math.min(vp.width / (bufW * UPSCALE), vp.height / (bufH * UPSCALE));
+  const availW = Math.max(40, vp.width - reservedRight);
+  const fitS = Math.min(availW / (bufW * UPSCALE), vp.height / (bufH * UPSCALE));
   cam.s = clampN(fitS, 0.25, 1);
   const eff = UPSCALE * cam.s;
-  cam.x = Math.max(0, Math.round((vp.width - bufW * eff) / 2));
+  cam.x = Math.max(0, Math.round((availW - bufW * eff) / 2));
   cam.y = Math.max(0, Math.round((vp.height - bufH * eff) / 2));
   applyCam();
 }
@@ -656,8 +668,8 @@ const agentAt = (clientX, clientY) => { const c = cellAt(clientX, clientY); retu
 
 // ---- hover affordance + tooltip --------------------------------------------
 // Hovering a desk rings it (handled in draw via hoverKey) and pops a light DOM
-// tooltip of what that agent is doing — render.js's hover-ring + info-card feel,
-// kept minimal (name · project, activity, current task). All fields come from
+// tooltip of what that agent is doing — a minimal hover-ring + info-card feel
+// (name · project, activity, current task). All fields come from
 // the agent object already in /api/state — no backend dependency.
 let tooltip = null;
 const ACTIVITY_TEXT = { working: 'shipping', shell: 'running a command', idle: 'idle' };
@@ -765,8 +777,8 @@ function attachInput() {
     e.preventDefault();
     hideTooltip();
     if (e.ctrlKey || e.metaKey) { // pinch / ⌘ → zoom around the cursor
-      // Magnitude-proportional zoom (ported from render.js:740-741). The old
-      // fixed per-event factor felt hair-trigger on trackpads, which fire many
+      // Magnitude-proportional zoom. A fixed per-event factor felt hair-trigger
+      // on trackpads, which fire many
       // tiny wheel events; exp(-step·0.01) scales with gesture size. Normalize
       // line-mode (mouse wheel) deltas to px first. zoomAt still clamps the scale.
       const step = e.deltaMode !== 0 ? e.deltaY * 16 : e.deltaY;
@@ -804,8 +816,8 @@ function draw() {
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
   }
   // "Waiting on you" — highest-signal state, painted LAST so it floats above every
-  // desk. agent.needsYou is pm1's field; awaitingReply is render.js's name for the
-  // same thing, kept as a harmless fallback. Falsy/absent → not waiting.
+  // desk. agent.needsYou is the live "blocked on you" field; awaitingReply is an
+  // older alias for the same thing, kept as a harmless fallback. Falsy → not waiting.
   for (const cell of cells) {
     const a = cell.agent;
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x + CELL_W / 2 + 2, cell.y + 22, frame);
@@ -813,12 +825,10 @@ function draw() {
 }
 
 // ---- public API ------------------------------------------------------------
-// Drop-in entry matching render.js's initOffice(canvas, labels) so app.js can
-// pick this module behind ?render=proc. Starts empty; the /api/state poll feeds
-// real agents via setAgents. (labels is render.js's HTML overlay element; proc
-// draws all text on-canvas, so it's ignored.)
-// ponytail: no click-to-select in proc mode yet — agency:select is dispatched by
-// render.js on canvas clicks; add a hit-test here when proc graduates from flag.
+// initOffice(canvas, labels) + setAgents(agents) are the entry points app.js
+// drives off the /api/state agent shape. Starts empty; the /api/state poll feeds
+// real agents via setAgents. (labels is an unused HTML overlay arg kept for the
+// call signature; this office draws its own DOM label group instead.)
 export function initOffice(canvasEl, _labels) {
   // Only wire up canvas/ctx — DON'T paint anything yet. Painting an empty,
   // furnished room before the first /api/state poll arrives caused a visible
@@ -826,8 +836,8 @@ export function initOffice(canvasEl, _labels) {
   // real data). The animation loop starts on the first setAgents() call instead,
   // so the first painted frame already reflects real agent data (or an
   // intentionally-empty room when the poll genuinely reports zero agents).
-  // (_labels is the shared sheet-office #labels element; proc owns its own DOM
-  // label group instead — see ensureLabelWrap — so the two renderers don't clash.)
+  // (_labels is the legacy #labels overlay arg; this office owns its own DOM
+  // label group instead — see ensureLabelWrap.)
   canvas = canvasEl;
   ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;

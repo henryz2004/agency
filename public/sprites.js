@@ -1,18 +1,70 @@
-// sprites.js — procedural pixel-art drawing primitives, rendered into a
-// low-resolution buffer and scaled up crisply by CSS (image-rendering:pixelated).
-// All coordinates are integers in buffer-pixel space.
+// sprites.js — ALL procedural pixel-art primitives for the office. Nothing here
+// blits a sprite sheet; every glyph is drawn with px() rects into a low-res
+// buffer that CSS scales up crisply (image-rendering:pixelated).
+//
+// ONE consistent style: chunky 1px-grid pixel art, warm palette, soft top
+// highlight + bottom shade on every solid so volumes read.
 
-export const POD_W = 64;
-export const POD_H = 92;
+// ---- tiny helpers ----------------------------------------------------------
+export function px(ctx, x, y, w, h, c) {
+  ctx.fillStyle = c;
+  ctx.fillRect(x | 0, y | 0, w | 0, h | 0);
+}
 
-// Color palette per model — keyed by short slug. Falls back to a hash-derived
-// color for any model not listed here via `colorFor(model)`.
+export function shade(hex, amt) {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.max(0, Math.min(255, r + amt));
+  g = Math.max(0, Math.min(255, g + amt));
+  b = Math.max(0, Math.min(255, b + amt));
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
+export function rng(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+export function hashInt(s) {
+  let h = 2166136261 >>> 0;
+  s = String(s);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+
+// ---- palette ---------------------------------------------------------------
+// Warm, cozy, cohesive. Model tiers keep the established color language:
+// opus=gold, sonnet=cyan, haiku=green, codex=orange.
+export const TIER = {
+  opus:   { screen: '#ffce5e', glow: 'rgba(255,206,94,0.30)',  led: '#ffd166', code: '#fff0c0' },
+  sonnet: { screen: '#5cd0ff', glow: 'rgba(92,208,255,0.30)',  led: '#5cd0ff', code: '#d0f4ff' },
+  haiku:  { screen: '#6cff9a', glow: 'rgba(108,255,154,0.28)', led: '#6cff9a', code: '#d6ffe2' },
+  codex:  { screen: '#ff9a4d', glow: 'rgba(255,138,61,0.30)',  led: '#ff8a3d', code: '#ffe0c9' },
+};
+export function tierFor(model) {
+  const m = (model || '').toLowerCase();
+  if (m.includes('codex')) return TIER.codex;
+  if (m.includes('haiku')) return TIER.haiku;
+  if (m.includes('sonnet')) return TIER.sonnet;
+  return TIER.opus; // opus / fable / default
+}
+
+// ---- model color palette (salvaged from the old sprites.js) ----------------
+// Used by app.js's model-mix bar/legend and the headcount comparison heads.
+// Kept here (the sole sprites module) so app.js's `import { drawHead, colorFor }
+// from './sprites.js'` resolves after proc graduation.
 export const MODEL_COLORS = {
   'opus':   { screen: '#ffd166', glow: 'rgba(255,209,102,0.25)', code: '#fff0c0' },
   'sonnet': { screen: '#5cd0ff', glow: 'rgba(92,208,255,0.25)', code: '#d0f4ff' },
   'haiku':  { screen: '#6cff9a', glow: 'rgba(108,255,154,0.22)', code: '#d6ffe2' },
 };
 
+// Color for a model slug (used by the model-mix panel). Falls back to a stable
+// hash-derived hue for any model not in MODEL_COLORS.
 export function colorFor(model) {
   if (!model) return MODEL_COLORS.opus;
   const m = model.toLowerCase();
@@ -32,17 +84,6 @@ export function colorFor(model) {
   return { screen, glow, code };
 }
 
-// Team-config member colors are CSS-ish words ("blue", "green", …). Map them to
-// the office palette so a background teammate's shirt reads as its team color.
-const TEAM_COLORS = {
-  blue: '#5d9ce0', green: '#5dc98a', yellow: '#e0b05d', purple: '#a87de0',
-  red: '#e05d5d', orange: '#e0855d', cyan: '#5dc9c9', pink: '#e07db0', gray: '#8a93a6',
-};
-export function teamColorHex(word) {
-  if (!word) return null;
-  return TEAM_COLORS[String(word).toLowerCase()] || null;
-}
-
 function hslToHex(h, s, l) {
   s /= 100; l /= 100;
   const k = n => (n + h / 30) % 12;
@@ -52,365 +93,7 @@ function hslToHex(h, s, l) {
   return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
 }
 
-// Tiny seeded PRNG so per-frame "code rain" is animated but stable within a frame.
-function rng(seed) {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-}
-
-function px(ctx, x, y, w, h, c) {
-  ctx.fillStyle = c;
-  ctx.fillRect(x | 0, y | 0, w | 0, h | 0);
-}
-
-function shade(hex, amt) {
-  const h = hex.replace('#', '');
-  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16);
-  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  r = Math.max(0, Math.min(255, r + amt));
-  g = Math.max(0, Math.min(255, g + amt));
-  b = Math.max(0, Math.min(255, b + amt));
-  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
-}
-
-// Draw one workstation: chair, seated worker (animated when busy), desk, and a
-// glowing monitor whose color encodes the model tier.
-// (px0, py0) = top-left of the pod cell in buffer coords.
-export function drawWorker(ctx, px0, py0, opts) {
-  const { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0', model = '', activity = 'idle', frame = 0, vacant = false, seed = 1, state = null, bodyless = false, noChair = false, noDeskMonitor = false } = opts;
-  const t = colorFor(model);
-  // `bodyless`: draw the WORKSTATION (chair, desk, keyboard, monitor, LED,
-  // minions) but skip the procedural PERSON — hybrid mode overlays a sprite
-  // character in the seat instead.
-  // `noChair`: additionally skip the procedural chair. The generated animated
-  // characters are SEATED sprites that bring their OWN chair, so the procedural
-  // chair would double up behind them; hybrid passes noChair for those. The
-  // STATIC standing sheet workers have no chair of their own, so they keep it.
-  // `noDeskMonitor`: skip the procedural desk slab, keyboard, desk clutter, and
-  // monitor — hybrid draws those from the office SHEET (real desk + tinted
-  // monitor + keyboard) in render.js instead. The status LED and minions stay.
-  // working = model generating (types, tier-colored output on screen);
-  // shell = a command is running (relaxed, terminal scrolling on screen); idle = still.
-  const typing = activity === 'working';
-  const shellRunning = activity === 'shell';
-  // Brief "thinking" pause in the typing rhythm: a few frames every ~14 where
-  // the hands rest (per-agent phase so pods don't pause in unison).
-  const typePause = typing && (frame + (seed % 7)) % 14 < 3;
-
-  const cx = px0 + 22; // worker center x
-  const deskTop = py0 + 50;
-
-  // ---- per-agent appearance, picked deterministically from seed -------------
-  // Draw from a *separate* rng stream than the per-frame animation rng so the
-  // look is identical every frame (variety from seed; motion from frame).
-  const vr = rng(seed * 2654435761 + 7); // "variant" rng — stable per agent
-  const v = {
-    hairStyle: Math.floor(vr() * 4), // 0 short, 1 tall/quiff, 2 side-part, 3 bald-ish
-    build: vr() < 0.5 ? 0 : vr() < 0.7 ? 1 : 2, // 0 normal, 1 broad, 2 slim
-    chair: ['#2b313e', '#3a2e3e', '#2e3a32', '#3a352b', '#2e2e44'][Math.floor(vr() * 5)],
-    glasses: vr() < 0.32,
-    headphones: vr() < 0.28,
-    beard: vr() < 0.24,
-    cap: 0, // resolved below so it can't collide with headphones
-    deskItemL: Math.floor(vr() * 5), // 0 none,1 mug,2 plant,3 sticky,4 papers
-    deskItemR: Math.floor(vr() * 5),
-    blinkPhase: Math.floor(vr() * 11), // staggers blinks across agents
-    breathPhase: Math.floor(vr() * 6),
-    sips: vr() < 0.5, // takes occasional coffee sips when not typing
-  };
-  // A cap/beanie occasionally replaces visible hair-top (skip if headphones).
-  if (!v.headphones && vr() < 0.22) v.cap = vr() < 0.5 ? 1 : 2; // 1 cap, 2 beanie
-
-  // Gentle idle micro-motions — only when NOT actively typing, so working stays
-  // crisp. Cadence is slow (frame increments ~every 130ms).
-  const fp = frame + v.breathPhase;
-  const breath = !typing && fp % 8 < 4 ? 1 : 0; // 1px torso/head rise
-  const headDy = vacant ? 0 : breath; // head bobs with breathing
-  // Occasional slow head turn while idle (a few frames every ~40 frames).
-  const idleState = !typing && !shellRunning && !vacant;
-  const turnCycle = (frame + seed) % 40;
-  const headTurn = idleState && turnCycle < 4 ? 1 : idleState && turnCycle >= 20 && turnCycle < 24 ? -1 : 0;
-  // Eye blink: a 1-frame closure on a per-agent staggered schedule.
-  const blink = !vacant && (frame + v.blinkPhase) % 11 === 0;
-  // Coffee sip: lift mug to face for a couple frames now and then (idle/shell).
-  const sipCycle = (frame + seed * 3) % 36;
-  const sipping = !vacant && v.sips && !typing && sipCycle < 3;
-
-  // chair back (per-agent upholstery color) — skipped under noChair so a seated
-  // sprite character that includes its own chair doesn't show a double chair.
-  const chair = v.chair;
-  if (!noChair) {
-    px(ctx, cx - 11, py0 + 16, 22, 34, chair);
-    px(ctx, cx - 11, py0 + 16, 22, 3, shade(chair, 18));
-    px(ctx, cx - 13, py0 + 22, 3, 22, shade(chair, -16));
-    px(ctx, cx + 10, py0 + 22, 3, 22, shade(chair, -16));
-  }
-
-  // hybrid (bodyless): the chair above stays, but the procedural person below is
-  // skipped — a generated sprite character is drawn into the seat by the caller.
-  if (!vacant && !bodyless) {
-    const hdx = headTurn; // shorthand: horizontal head/face offset
-    const hy = py0 + 6 - headDy; // head top y, lifts slightly on breath-in
-    // hair / headwear (top + sides), shifted with the head turn
-    if (v.cap === 2) {
-      // beanie: rounded knit hugging the skull
-      px(ctx, cx - 7 + hdx, hy, 14, 5, hair);
-      px(ctx, cx - 7 + hdx, hy + 4, 14, 1, shade(hair, 24)); // knit band
-      px(ctx, cx - 8 + hdx, hy + 5, 3, 4, hair);
-      px(ctx, cx + 5 + hdx, hy + 5, 3, 4, hair);
-    } else if (v.cap === 1) {
-      // ball cap: crown + forward brim
-      px(ctx, cx - 7 + hdx, hy, 14, 4, hair);
-      px(ctx, cx - 7 + hdx, hy + 3, 16, 1, shade(hair, -18)); // brim
-      px(ctx, cx - 8 + hdx, hy + 5, 3, 4, hair);
-      px(ctx, cx + 5 + hdx, hy + 5, 3, 4, hair);
-    } else if (v.hairStyle === 3) {
-      // close-cropped / receding: thin top, longer sides
-      px(ctx, cx - 6 + hdx, hy + 2, 12, 3, hair);
-      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
-      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
-    } else if (v.hairStyle === 1) {
-      // tall quiff
-      px(ctx, cx - 6 + hdx, hy - 2, 12, 8, hair);
-      px(ctx, cx - 3 + hdx, hy - 4, 6, 3, hair);
-      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
-      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
-    } else if (v.hairStyle === 2) {
-      // side part: asymmetric top + a longer side sweep
-      px(ctx, cx - 7 + hdx, hy, 14, 6, hair);
-      px(ctx, cx - 2 + hdx, hy, 2, 3, shade(hair, 20)); // part line
-      px(ctx, cx - 8 + hdx, hy + 4, 3, 9, hair);
-      px(ctx, cx + 5 + hdx, hy + 4, 3, 7, hair);
-    } else {
-      // 0: classic short
-      px(ctx, cx - 7 + hdx, hy, 14, 6, hair);
-      px(ctx, cx - 8 + hdx, hy + 4, 3, 8, hair);
-      px(ctx, cx + 5 + hdx, hy + 4, 3, 8, hair);
-    }
-    // face (follows the head turn + breath)
-    const fy = py0 + 10 - headDy;
-    px(ctx, cx - 6 + hdx, fy, 12, 11, skin);
-    px(ctx, cx - 6 + hdx, fy, 12, 2, shade(skin, 18)); // forehead highlight
-    // eyes — drawn open, then closed to a thin lid line on a blink frame
-    if (blink) {
-      px(ctx, cx - 4 + hdx, fy + 6, 2, 1, shade(skin, -35));
-      px(ctx, cx + 2 + hdx, fy + 6, 2, 1, shade(skin, -35));
-    } else {
-      px(ctx, cx - 4 + hdx, fy + 5, 2, 2, '#1a1a22');
-      px(ctx, cx + 2 + hdx, fy + 5, 2, 2, '#1a1a22');
-    }
-    // glasses: rims around the eyes + a bridge
-    if (v.glasses) {
-      const gc = '#20242d';
-      px(ctx, cx - 5 + hdx, fy + 4, 4, 4, gc);
-      px(ctx, cx - 4 + hdx, fy + 5, 2, 2, skin); // lens hollow (redrawn below if blink)
-      px(ctx, cx + 1 + hdx, fy + 4, 4, 4, gc);
-      px(ctx, cx + 2 + hdx, fy + 5, 2, 2, skin);
-      px(ctx, cx - 1 + hdx, fy + 5, 2, 1, gc); // bridge
-      // re-stamp pupils on top of the cleared lens (open eyes only)
-      if (!blink) {
-        px(ctx, cx - 4 + hdx, fy + 5, 2, 2, '#1a1a22');
-        px(ctx, cx + 2 + hdx, fy + 5, 2, 2, '#1a1a22');
-      }
-    }
-    // beard: shadow along the jaw + chin
-    if (v.beard) {
-      px(ctx, cx - 6 + hdx, fy + 8, 12, 3, shade(skin, -45));
-      px(ctx, cx - 4 + hdx, fy + 9, 8, 2, shade(skin, -55));
-    }
-    // mouth (focused when generating; hidden behind a mug mid-sip)
-    if (!sipping) {
-      px(ctx, cx - 2 + hdx, fy + 9, 4, 1, typing ? shade(skin, -40) : shade(skin, -25));
-    }
-    // headphones: ear cups + an over-the-head band
-    if (v.headphones) {
-      px(ctx, cx - 8 + hdx, fy + 3, 2, 5, '#23262e'); // left cup
-      px(ctx, cx + 6 + hdx, fy + 3, 2, 5, '#23262e'); // right cup
-      px(ctx, cx - 8 + hdx, py0 + 5 - headDy, 16, 2, '#33373f'); // band
-    }
-    // neck
-    px(ctx, cx - 2 + hdx, py0 + 21 - headDy, 4, 3, shade(skin, -15));
-
-    // torso (shirt), widening trapezoid — width varies with body build
-    const bw = v.build === 1 ? 1 : v.build === 2 ? -1 : 0; // broad/slim delta
-    const ty = py0 + 24 - breath; // whole torso rises a touch on a breath
-    px(ctx, cx - 6 - bw, ty, 12 + bw * 2, 3, shirt);
-    px(ctx, cx - 7 - bw, ty + 3, 14 + bw * 2, 4, shirt);
-    px(ctx, cx - 8 - bw, ty + 7, 16 + bw * 2, 8, shirt);
-    px(ctx, cx + 3 + bw, ty, 5, 15, shade(shirt, -28)); // right-side shade
-    px(ctx, cx - 1, ty, 2, 15, shade(shirt, 16)); // collar/placket
-
-    // arms reaching to keyboard — hands only bob while actively generating
-    // (and not during a brief thinking pause)
-    const lh = typing && !typePause ? (frame % 2 ? 0 : 1) : 0; // left hand bob
-    const rh = typing && !typePause ? (frame % 2 ? 1 : 0) : 0; // right hand bob
-    px(ctx, cx - 10 - bw, py0 + 30, 3, 12, shade(shirt, -10)); // left arm
-    px(ctx, cx + 7 + bw, py0 + 30, 3, 12, shade(shirt, -10)); // right arm
-    if (sipping) {
-      // right hand raises a coffee mug toward the mouth instead of typing
-      px(ctx, cx + 7 + bw, py0 + 28, 3, 6, shade(shirt, -10)); // bent forearm
-      px(ctx, cx + 3, fy + 7, 4, 4, '#d8d2c8'); // mug at the lips
-      px(ctx, cx + 3, fy + 8, 1, 2, '#6f5240'); // coffee
-      px(ctx, cx - 11, deskTop - 4, 4, 3, skin); // left hand rests on desk
-    } else {
-      px(ctx, cx - 11, deskTop - 4 + lh, 4, 3, skin); // left hand
-      px(ctx, cx + 7 + bw, deskTop - 4 + rh, 4, 3, skin); // right hand
-    }
-  }
-
-  // --- procedural desk slab + keyboard + clutter + monitor ---
-  // Skipped under noDeskMonitor (hybrid sheet-workstation mode), where the desk,
-  // tinted monitor and keyboard come from the office sheet instead. The status
-  // LED and subagent minions below are kept in both modes.
-  if (!noDeskMonitor) {
-  // desk slab
-  px(ctx, px0 + 2, deskTop, POD_W - 4, 7, '#6b4f3a');
-  px(ctx, px0 + 2, deskTop, POD_W - 4, 2, '#7d5f48');
-  px(ctx, px0 + 2, deskTop + 7, POD_W - 4, 3, '#4a3526'); // front edge
-
-  // keyboard
-  px(ctx, cx - 9, deskTop - 1, 18, 3, '#1c2029');
-  px(ctx, cx - 8, deskTop - 1, 16, 1, '#2a3340');
-
-  // per-agent desk clutter: a small item to the left of the keyboard and one in
-  // the gap before the monitor. Both sit on the desk surface (base at deskTop),
-  // well above the name-plate / minion strip. Suppress the left mug while the
-  // worker is sipping (the mug is in hand then).
-  if (!vacant) {
-    // suppress the left mug only when the procedural worker is mid-sip (mug in
-    // hand); in bodyless/hybrid there's no hand, so the mug always sits on the desk.
-    if (!sipping || bodyless) drawDeskItem(ctx, px0 + 5, deskTop, v.deskItemL, t, frame);
-    // right slot tucks into the keyboard→monitor gap; the monitor (drawn next)
-    // overlaps any 1px spill so a wider prop reads as sitting beside the screen.
-    drawDeskItem(ctx, px0 + 32, deskTop, v.deskItemR, t, frame);
-  }
-
-  // monitor on the right side of the desk
-  const mx = px0 + 47;
-  const mTop = py0 + 22;
-  // glow halo
-  ctx.fillStyle = t.glow;
-  ctx.fillRect(mx - 12, mTop - 3, 24, 22);
-  // bezel
-  px(ctx, mx - 10, mTop, 20, 16, '#0d0f14');
-  px(ctx, mx - 10, mTop, 20, 16, '#0d0f14');
-  // screen background depends on what's happening on it
-  const TERM = '#8bd450'; // terminal green for a running shell
-  if (vacant) {
-    px(ctx, mx - 8, mTop + 2, 16, 12, '#11141b');
-  } else if (typing) {
-    px(ctx, mx - 8, mTop + 2, 16, 12, shade(t.screen, -10)); // model output, tier-tinted
-  } else if (shellRunning) {
-    px(ctx, mx - 8, mTop + 2, 16, 12, '#0b130d'); // dark terminal
-  } else {
-    px(ctx, mx - 8, mTop + 2, 16, 12, shade(t.screen, -70)); // dim
-  }
-  // on-screen content
-  if (!vacant) {
-    if (typing) {
-      // model output: tier-colored code rain
-      const rand = rng(seed * 31 + frame);
-      for (let i = 0; i < 5; i++) {
-        const ly = mTop + 3 + Math.floor(rand() * 10);
-        const lx = mx - 7 + Math.floor(rand() * 4);
-        const lw = 2 + Math.floor(rand() * 8);
-        px(ctx, lx, ly, Math.min(lw, mx + 7 - lx), 1, t.code);
-      }
-      // during a thinking pause the output settles to a blinking caret
-      if (typePause && frame % 2) px(ctx, mx - 7, mTop + 11, 2, 1, t.code);
-    } else if (shellRunning) {
-      // terminal log scrolling upward + a blinking cursor
-      for (let i = 0; i < 4; i++) {
-        const ly = mTop + 3 + ((i * 3 + frame) % 11);
-        const r = rng(seed * 17 + i);
-        const lw = 3 + Math.floor(r() * 8);
-        px(ctx, mx - 7, ly, Math.min(lw, 14), 1, TERM);
-      }
-      if (frame % 2) px(ctx, mx - 7, mTop + 12, 2, 1, TERM);
-    } else {
-      // idle: a couple of dim static lines
-      px(ctx, mx - 7, mTop + 5, 6, 1, shade(t.code, -60));
-      px(ctx, mx - 7, mTop + 9, 4, 1, shade(t.code, -60));
-    }
-  }
-  // stand
-  px(ctx, mx - 2, mTop + 16, 4, 3, '#3a4150');
-  px(ctx, mx - 5, mTop + 19, 10, 2, '#2b313e');
-  } // end if (!noDeskMonitor)
-
-  // status LED: green pulse = generating, amber pulse = shell running,
-  // steady cyan = finished, gray = idle
-  if (!vacant) {
-    let on;
-    if (typing) on = frame % 2 ? '#39d98a' : '#1f7d52';
-    else if (shellRunning) on = frame % 2 ? '#ffb454' : '#9c6a1f';
-    else if (state === 'done') on = '#5cd0ff';
-    else on = '#4a5568';
-    px(ctx, px0 + 6, deskTop + 2, 3, 3, on);
-  }
-
-  // currently-running subagents huddle on the floor in front of the desk
-  const subs = vacant ? [] : opts.subagents || [];
-  if (subs.length) {
-    const n = Math.min(subs.length, 4);
-    const spacing = 9;
-    const startX = px0 + Math.round((POD_W - n * spacing) / 2) + 1;
-    for (let i = 0; i < n; i++) {
-      drawMinion(ctx, startX + i * spacing, deskTop + 21, (frame + i) % 2);
-    }
-  }
-}
-
-// A small desk prop, drawn sitting on the desk surface with its base at baseY.
-// kind: 0 none, 1 coffee mug, 2 tiny plant, 3 sticky note, 4 paper stack.
-// Each rises only a few px above the desk — never near the plate/minion strip.
-function drawDeskItem(ctx, x, baseY, kind, t, frame) {
-  if (kind === 1) {
-    // coffee mug with a handle and a wisp of steam
-    px(ctx, x, baseY - 5, 5, 5, '#d8d2c8'); // cup
-    px(ctx, x, baseY - 5, 5, 1, '#ece7df'); // rim highlight
-    px(ctx, x + 1, baseY - 4, 3, 1, '#6f5240'); // coffee surface
-    px(ctx, x + 5, baseY - 4, 1, 2, '#b7b1a7'); // handle
-    if (frame % 4 < 2) px(ctx, x + 2, baseY - 7, 1, 1, '#9aa0ad'); // steam
-  } else if (kind === 2) {
-    // tiny potted plant
-    px(ctx, x + 1, baseY - 3, 4, 3, '#9c5a2e'); // pot
-    px(ctx, x + 1, baseY - 3, 4, 1, '#b06a36'); // pot rim
-    px(ctx, x, baseY - 6, 2, 3, '#3f9a55'); // left frond
-    px(ctx, x + 2, baseY - 7, 2, 4, '#4cb364'); // center frond
-    px(ctx, x + 4, baseY - 5, 2, 2, '#3f9a55'); // right frond
-  } else if (kind === 3) {
-    // sticky note on a small stand, faintly catching the monitor glow
-    px(ctx, x, baseY - 5, 5, 5, '#f4d35e');
-    px(ctx, x, baseY - 5, 5, 1, '#ffe27a');
-    px(ctx, x + 1, baseY - 3, 3, 1, shade('#f4d35e', -60)); // scribble
-    px(ctx, x + 1, baseY - 1, 2, 1, t.glow ? shade(t.screen, -30) : '#888');
-  } else if (kind === 4) {
-    // stack of papers, slightly skewed
-    px(ctx, x, baseY - 2, 6, 2, '#e8e4dc');
-    px(ctx, x + 1, baseY - 4, 6, 2, '#f2efe9');
-    px(ctx, x + 1, baseY - 4, 6, 1, '#ffffff');
-    px(ctx, x + 2, baseY - 3, 3, 1, '#b9b4ab'); // text line
-  }
-  // kind 0: nothing
-}
-
-// A tiny teal "helper" figure representing a running subagent.
-function drawMinion(ctx, x, feetY, bob) {
-  const y = feetY - bob;
-  px(ctx, x + 1, y - 9, 4, 2, '#1f2a33'); // hair
-  px(ctx, x + 1, y - 8, 4, 3, '#f0c8a0'); // head
-  px(ctx, x + 2, y - 7, 1, 1, '#10141a'); // eye
-  px(ctx, x, y - 5, 6, 4, '#2bb0aa'); // teal body
-  px(ctx, x + 4, y - 5, 2, 4, '#1f8a85'); // body shade
-  px(ctx, x + 1, y - 1, 1, 1, '#171b22'); // legs
-  px(ctx, x + 4, y - 1, 1, 1, '#171b22');
-}
-
-// A single pixel "head" used for the headcount comparison row.
+// A single pixel "head" used for the headcount comparison row in app.js.
 export function drawHead(ctx, x, y, { skin = '#f0c8a0', hair = '#2b2233', shirt = '#5d9ce0' } = {}) {
   px(ctx, x + 1, y, 6, 2, hair);
   px(ctx, x, y + 2, 8, 2, hair);
@@ -420,85 +103,461 @@ export function drawHead(ctx, x, y, { skin = '#f0c8a0', hair = '#2b2233', shirt 
   px(ctx, x, y + 6, 8, 3, shirt);
 }
 
-// Sims-style selection brackets drawn just inside a pod's bounds. `strong`
-// (the selected agent) also gets a faint full outline that pulses.
-export function drawSelectRing(ctx, px0, py0, color, frame, strong) {
-  const x0 = px0 + 1, y0 = py0 + 1, x1 = px0 + POD_W - 2, y1 = py0 + POD_H - 2;
+// Skin / hair / shirt variety palettes — warm and varied but harmonious.
+const SKINS = ['#f2cda4', '#e8b88a', '#d49a6a', '#b87a4e', '#a86a44', '#8a5a3c'];
+const HAIRS = ['#2b2233', '#4a3326', '#6b4a2e', '#8a5a30', '#c98a3a', '#9a9aa6', '#1d1d24', '#5a2d2d'];
+const SHIRTS = ['#d9694f', '#5d9ce0', '#5dc98a', '#e0b05d', '#a87de0', '#5dc9c9', '#e07db0', '#c0584f', '#4f8fb0'];
+
+// ---- the back wall ---------------------------------------------------------
+// A textured cream plaster wall (no sky — wall fills the whole band from the top
+// of the canvas) with a wood rail, windows looking out on blue sky, a wall clock,
+// framed pictures, and a glass whiteboard — all procedural.
+// `wallH` is the full wall band height (the floor begins at y = wallH).
+export function drawWall(ctx, bufW, wallH, frame) {
+  // --- plaster wall fills the band from the top ---
+  const wy = 0;
+  ctx.fillStyle = '#efe6d4';
+  ctx.fillRect(0, wy, bufW, wallH);
+  // soft horizontal paneling lines (very faint) for texture
+  ctx.fillStyle = 'rgba(150,120,80,0.05)';
+  for (let y = wy + 12; y < wy + wallH - 8; y += 10) ctx.fillRect(0, y, bufW, 1);
+  // a subtle ceiling shade along the very top so the wall reads as receding
+  ctx.fillStyle = 'rgba(80,60,40,0.12)';
+  ctx.fillRect(0, wy, bufW, 3);
+  ctx.fillStyle = 'rgba(80,60,40,0.05)';
+  ctx.fillRect(0, wy + 3, bufW, 2);
+
+  // --- wall hangings: clock, pictures, glass board, windows ---
+  // windows tiled across, skipping a centre band for the clock/board
+  const winY = wy + 14, winW = 26, winH = 32;
+  for (let x = 40, k = 0; x < bufW - 40; x += 64, k++) {
+    // leave a gap mid-wall for the clock + board
+    if (x > bufW * 0.38 && x < bufW * 0.58) continue;
+    drawWindow(ctx, x, winY, winW, winH, frame);
+  }
+  // wall clock high-centre
+  drawClock(ctx, Math.round(bufW * 0.46), wy + 16, frame);
+  // a framed landscape picture + a calendar near the left
+  drawPicture(ctx, 14, wy + 20);
+  drawCalendar(ctx, 34, wy + 20);
+  // a small green glass whiteboard centre-right
+  drawGlassBoard(ctx, Math.round(bufW * 0.5) + 8, wy + 16);
+
+  // --- wood rail + baseboard at the bottom of the wall ---
+  ctx.fillStyle = '#b07c44';
+  ctx.fillRect(0, wy + wallH - 7, bufW, 4); // wood rail
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(0, wy + wallH - 7, bufW, 1); // rail highlight
+  ctx.fillStyle = '#7d5630';
+  ctx.fillRect(0, wy + wallH - 3, bufW, 3); // baseboard
+}
+
+function drawWindow(ctx, x, y, w, h, frame) {
+  // frame
+  px(ctx, x - 1, y - 1, w + 2, h + 2, '#3a4a63');
+  // sky glass with a soft gradient + a diagonal glare streak
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, '#7fc0f0');
+  g.addColorStop(1, '#a9d8f7');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  // glare
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillRect(x + 3, y + 2, 2, h - 4);
+  ctx.fillRect(x + 6, y + 2, 1, h - 4);
+  // muntins (cross bars)
+  px(ctx, x + (w >> 1), y, 1, h, '#3a4a63');
+  px(ctx, x, y + (h >> 1), w, 1, '#3a4a63');
+  // a tiny potted plant on some sills (deterministic)
+  if ((hashInt('sill' + x) & 3) === 0) {
+    px(ctx, x + w - 7, y + h - 4, 4, 3, '#b5602e');
+    px(ctx, x + w - 6, y + h - 7, 2, 3, '#4cb364');
+  }
+}
+
+function drawClock(ctx, x, y, frame) {
+  px(ctx, x - 1, y - 1, 12, 12, '#cdd6e6'); // rim
+  px(ctx, x, y, 10, 10, '#fbf7ee');         // face
+  px(ctx, x, y, 10, 1, '#e3ddd0');
+  // ticks
+  ctx.fillStyle = '#9a9488';
+  px(ctx, x + 4, y + 1, 1, 1, '#9a9488');
+  px(ctx, x + 4, y + 8, 1, 1, '#9a9488');
+  px(ctx, x + 1, y + 4, 1, 1, '#9a9488');
+  px(ctx, x + 8, y + 4, 1, 1, '#9a9488');
+  // hands (hour fixed-ish, minute sweeps slowly)
+  const min = (frame * 6) % 360;
+  const a = (min * Math.PI) / 180;
+  px(ctx, x + 5, y + 5, 1, 1, '#23262e');
+  px(ctx, x + 5, y + 2, 1, 3, '#23262e'); // hour up
+  px(ctx, x + 5 + Math.round(Math.sin(a) * 3), y + 5 - Math.round(Math.cos(a) * 3), 1, 1, '#c0473a');
+}
+
+function drawPicture(ctx, x, y) {
+  px(ctx, x, y, 16, 12, '#6b4a2e');       // frame
+  px(ctx, x + 1, y + 1, 14, 10, '#bfe3f5'); // sky
+  px(ctx, x + 1, y + 7, 14, 4, '#e9c986');  // sandy ground
+  px(ctx, x + 3, y + 4, 4, 4, '#e7a23a');   // sun-ish
+  px(ctx, x + 1, y + 6, 14, 1, '#cda35e');
+}
+
+function drawCalendar(ctx, x, y) {
+  px(ctx, x, y, 13, 12, '#f4f1ea');
+  px(ctx, x, y, 13, 3, '#c0473a'); // red header
+  ctx.fillStyle = '#b9c0cc';
+  for (let r = 0; r < 3; r++)
+    for (let c = 0; c < 4; c++) px(ctx, x + 1 + c * 3, y + 4 + r * 3, 2, 2, '#b9c0cc');
+  px(ctx, x + 7, y + 7, 2, 2, '#e0855d'); // a marked day
+}
+
+function drawGlassBoard(ctx, x, y) {
+  px(ctx, x - 1, y - 1, 40, 22, '#2e5b4a'); // dark green board
+  px(ctx, x, y, 38, 20, '#356a56');
+  px(ctx, x, y, 38, 1, 'rgba(255,255,255,0.12)');
+  // faint scribbles + a tiny mountain logo (a la NORTHRIDGE STUDIO)
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  px(ctx, x + 4, y + 4, 6, 1, 'rgba(255,255,255,0.55)');
+  px(ctx, x + 4, y + 7, 10, 1, 'rgba(255,255,255,0.35)');
+  px(ctx, x + 4, y + 10, 7, 1, 'rgba(255,255,255,0.35)');
+  // little chart bars
+  ctx.fillStyle = '#8fdcb6';
+  px(ctx, x + 24, y + 13, 2, 4, '#8fdcb6');
+  px(ctx, x + 27, y + 11, 2, 6, '#8fdcb6');
+  px(ctx, x + 30, y + 8, 2, 9, '#8fdcb6');
+}
+
+// ---- the floor -------------------------------------------------------------
+// Warm wood planks — the cozy WeWork / Stardew vibe rather than cold tile.
+export function drawFloor(ctx, bufW, top, bufH) {
+  const plank = 14;
+  for (let y = top, row = 0; y < bufH; y += plank, row++) {
+    ctx.fillStyle = row % 2 ? '#c79a5e' : '#bb8e52'; // alternating board shade
+    ctx.fillRect(0, y, bufW, plank);
+    ctx.fillStyle = 'rgba(70,40,12,0.28)'; // seam below each board row
+    ctx.fillRect(0, y + plank - 1, bufW, 1);
+    ctx.fillStyle = 'rgba(255,240,210,0.10)'; // top sheen of each board
+    ctx.fillRect(0, y, bufW, 1);
+    ctx.fillStyle = 'rgba(70,40,12,0.16)'; // staggered board-end joints
+    for (let x = (row % 2 ? 0 : 44); x < bufW; x += 88) ctx.fillRect(x, y, 1, plank - 1);
+  }
+}
+
+// Soft warm daylight wash from the windows fading toward the front.
+export function drawDaylight(ctx, bufW, top, bufH) {
+  const g = ctx.createLinearGradient(0, top, 0, bufH);
+  g.addColorStop(0, 'rgba(255,238,200,0.16)');
+  g.addColorStop(0.5, 'rgba(255,238,200,0.03)');
+  g.addColorStop(1, 'rgba(40,22,6,0.14)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, top, bufW, bufH - top);
+}
+
+// ---- a worker ("person at a desk") -----------------------------------------
+// A little front-facing person: hair/skin/shirt vary per seed; hands type when
+// working. Drawn so the head clears the cubicle divider and the body sits behind
+// the desk. (cx, seatY) = centre-x, the chair seat line.
+export function drawPerson(ctx, cx, headTopY, opts) {
+  const { seed = 1, activity = 'idle', frame = 0 } = opts;
+  const vr = rng(seed * 2654435761 + 7);
+  const skin = SKINS[Math.floor(vr() * SKINS.length)];
+  const hair = HAIRS[Math.floor(vr() * HAIRS.length)];
+  const shirt = SHIRTS[Math.floor(vr() * SHIRTS.length)];
+  const hairStyle = Math.floor(vr() * 4);
+  const glasses = vr() < 0.3;
+  const headphones = vr() < 0.22;
+  const beard = vr() < 0.22;
+
+  const typing = activity === 'working';
+  const shellRunning = activity === 'shell';
+  const fp = frame + (seed % 6);
+  const breath = !typing && fp % 8 < 4 ? 1 : 0;
+  const hy = headTopY - breath;
+  const blink = (frame + (seed % 11)) % 13 === 0;
+
+  // --- hair / head --- always draw FULL hair (incl. for headphone wearers) so
+  // nobody renders as a bare head with a stray dark bar laid across it.
+  const hx = cx - 6;
+  if (hairStyle === 1) { // tall quiff
+    px(ctx, hx, hy - 2, 12, 8, hair);
+    px(ctx, hx + 3, hy - 4, 6, 3, hair);
+  } else if (hairStyle === 2) { // side part
+    px(ctx, hx, hy, 12, 6, hair);
+    px(ctx, hx + 4, hy, 2, 3, shade(hair, 22));
+  } else if (hairStyle === 3) { // cropped
+    px(ctx, hx + 1, hy + 1, 10, 4, hair);
+  } else { // classic
+    px(ctx, hx, hy, 12, 6, hair);
+  }
+  px(ctx, hx - 1, hy + 4, 2, 7, hair); // sides
+  px(ctx, hx + 11, hy + 4, 2, 7, hair);
+  // face
+  const fy = hy + 4;
+  px(ctx, cx - 5, fy, 11, 10, skin);
+  px(ctx, cx - 5, fy, 11, 2, shade(skin, 16)); // forehead light
+  // eyes
+  if (blink) {
+    px(ctx, cx - 3, fy + 5, 2, 1, shade(skin, -40));
+    px(ctx, cx + 2, fy + 5, 2, 1, shade(skin, -40));
+  } else {
+    px(ctx, cx - 3, fy + 4, 2, 2, '#1b1b22');
+    px(ctx, cx + 2, fy + 4, 2, 2, '#1b1b22');
+  }
+  if (glasses) {
+    px(ctx, cx - 4, fy + 3, 4, 4, '#23262e');
+    px(ctx, cx + 1, fy + 3, 4, 4, '#23262e');
+    px(ctx, cx - 3, fy + 4, 2, 2, blink ? skin : '#1b1b22');
+    px(ctx, cx + 2, fy + 4, 2, 2, blink ? skin : '#1b1b22');
+    px(ctx, cx, fy + 4, 1, 1, '#23262e'); // bridge
+  }
+  if (beard) px(ctx, cx - 5, fy + 7, 11, 3, shade(skin, -48));
+  px(ctx, cx - 1, fy + 8, 3, 1, shade(skin, -30)); // mouth
+  if (headphones) {
+    // over-ear cups beside the face + a slim 1px band hugging the crown with a
+    // top highlight, so it reads as headphones — not a flat dark bar over the hair
+    px(ctx, cx - 8, fy + 1, 2, 6, '#2b2f38'); // left cup
+    px(ctx, cx - 8, fy + 2, 1, 4, '#454b55');  // left cup sheen
+    px(ctx, cx + 6, fy + 1, 2, 6, '#2b2f38'); // right cup
+    px(ctx, cx + 7, fy + 2, 1, 4, '#1d2026');  // right cup shade
+    px(ctx, cx - 6, hy - 1, 12, 1, '#2b2f38'); // crown band (slim)
+    px(ctx, cx - 5, hy - 2, 10, 1, '#454b55');  // band highlight, just above
+  }
+  // neck
+  px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14));
+
+  // --- torso (shirt) ---
+  const ty = fy + 12 - breath;
+  px(ctx, cx - 6, ty, 13, 3, shirt);
+  px(ctx, cx - 7, ty + 3, 15, 9, shirt);
+  px(ctx, cx + 4, ty, 4, 12, shade(shirt, -26)); // right-side shade
+  px(ctx, cx - 1, ty, 2, 12, shade(shirt, 18));  // collar/placket
+  // arms to the desk; hands bob while typing
+  const lh = typing && frame % 2 ? 1 : 0;
+  const rh = typing && frame % 2 ? 0 : 1;
+  px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
+  px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
+  px(ctx, cx - 9, ty + 11 + (typing ? lh : 0), 3, 2, skin); // hands
+  px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
+}
+
+// ---- a desk workstation ----------------------------------------------------
+// A clean open desk (NO enclosing cubicle frame): a wood desk surface, a glowing
+// tier-colored monitor + keyboard, a country/flag pin, a sticky-note cluster, a
+// desk plant or mug, and the seated person. Everything procedural. The desk sits
+// directly on its team rug (drawn by the office), reading like open team pods
+// rather than boxed cubicles.
+// (x, y) = top-left of the cell; CW/CH = cell size.
+export const CELL_W = 58;
+export const CELL_H = 78;
+const DESK_TOP = 52;   // desk surface y within the cell
+const DIV_W = 4;       // legacy inset used to position desk props/flag
+
+export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
+  const tier = tierFor(agent.model);
+  const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
+  const cx = x + CELL_W / 2;
+  const idle = agent.activity === 'idle';
+
+  // --- the seated worker (head clears the desk, body behind it) --- dim when
+  // idle so active desks pop and idle ones visibly recede on a glance-scan
+  if (idle) ctx.globalAlpha = 0.5;
+  drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame });
+  ctx.globalAlpha = 1;
+
+  // --- a pinned flag floating just above the monitor (cozy personalization) ---
+  drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
+  // a sticky-note cluster on the other shoulder
+  drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
+
+  // --- wood desk surface across the cell ---
+  const dx = x + DIV_W, dw = CELL_W - DIV_W * 2;
+  px(ctx, dx, y + DESK_TOP, dw, 8, '#9c6f44');       // desk slab
+  px(ctx, dx, y + DESK_TOP, dw, 2, '#b3855a');       // top light
+  px(ctx, dx, y + DESK_TOP + 8, dw, 3, '#6f4a2a');   // front edge
+
+  // --- monitor (tier-colored screen + activity content) on the right ---
+  drawMonitor(ctx, x + CELL_W - 24, y + DESK_TOP - 18, tier, agent, seed, frame);
+  // keyboard in front of the worker
+  px(ctx, cx - 9, y + DESK_TOP + 1, 16, 3, '#1c2029');
+  px(ctx, cx - 8, y + DESK_TOP + 1, 14, 1, '#2a3340');
+  // a desk mug or tiny plant on the left
+  drawDeskProp(ctx, x + DIV_W + 3, y + DESK_TOP, seed, frame);
+
+  // --- status LED on the desk ---
+  const led = ledColor(agent.activity, frame);
+  px(ctx, dx + 2, y + DESK_TOP + 3, 3, 3, led);
+  // soft monitor glow over the cell while active
+  if (agent.activity === 'working' || agent.activity === 'shell') {
+    ctx.fillStyle = tier.glow;
+    ctx.fillRect(x + CELL_W - 30, y + DESK_TOP - 22, 28, 24);
+  }
+
+  // --- subagents: tiny helpers on the floor in front of the desk ---
+  const subs = agent.subagents || [];
+  if (subs.length) {
+    const n = Math.min(subs.length, 4), sp = 9;
+    const sx = Math.round(x + (CELL_W - n * sp) / 2);
+    for (let i = 0; i < n; i++) drawMinion(ctx, sx + i * sp, y + CELL_H - 4, (frame + i) % 2);
+  }
+
+  // --- selection / hover ring --- (selected = persistent tier-colored pulse;
+  // hover = cyan #5cd0ff)
+  if (selected || hovered) drawRing(ctx, x, y, CELL_W, CELL_H, selected ? tier.led : '#5cd0ff', frame, selected);
+}
+
+function ledColor(act, frame) {
+  if (act === 'working') return frame % 2 ? '#39d98a' : '#1f7d52';
+  if (act === 'shell') return frame % 2 ? '#ffb454' : '#9c6a1f';
+  return '#5a6478';
+}
+
+function drawMonitor(ctx, x, y, tier, agent, seed, frame) {
+  const mw = 20, mh = 15;
+  px(ctx, x - 1, y - 1, mw + 2, mh + 2, '#15181f'); // bezel
+  px(ctx, x, y, mw, mh, '#0d0f14');
+  const typing = agent.activity === 'working';
+  const shellRunning = agent.activity === 'shell';
+  // screen fill
+  if (typing) px(ctx, x + 1, y + 1, mw - 2, mh - 2, shade(tier.screen, -16));
+  else if (shellRunning) px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b130d');
+  else px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b0e14'); // idle → screen OFF (dark glass, no tier tint)
+  // content
+  if (typing) {
+    const r = rng(seed * 31 + frame);
+    for (let i = 0; i < 5; i++) {
+      const ly = y + 2 + Math.floor(r() * (mh - 4));
+      const lx = x + 2 + Math.floor(r() * 3);
+      const lw = 2 + Math.floor(r() * 10);
+      px(ctx, lx, ly, Math.min(lw, mw - 3 - (lx - x)), 1, tier.code);
+    }
+  } else if (shellRunning) {
+    for (let i = 0; i < 4; i++) {
+      const ly = y + 2 + ((i * 3 + frame) % (mh - 3));
+      const lw = 3 + (hashInt('t' + seed + i) % 9);
+      px(ctx, x + 2, ly, Math.min(lw, mw - 4), 1, '#8bd450');
+    }
+    if (frame % 2) px(ctx, x + 2, y + mh - 3, 2, 1, '#8bd450');
+  } else { // idle: no content — just a faint glass reflection so it reads "off"
+    px(ctx, x + 2, y + 2, 1, mh - 4, 'rgba(255,255,255,0.06)');
+    px(ctx, x + 4, y + 3, 1, mh - 6, 'rgba(255,255,255,0.03)');
+  }
+  // stand
+  px(ctx, x + (mw >> 1) - 1, y + mh, 3, 3, '#3a4150');
+  px(ctx, x + (mw >> 1) - 4, y + mh + 3, 9, 2, '#2b313e');
+}
+
+function drawDeskProp(ctx, x, baseY, seed, frame) {
+  const kind = hashInt('prop' + seed) % 4;
+  if (kind === 0) { // coffee mug + steam
+    px(ctx, x, baseY - 5, 5, 5, '#e4ded3');
+    px(ctx, x, baseY - 5, 5, 1, '#f2ede4');
+    px(ctx, x + 1, baseY - 4, 3, 1, '#6f5240');
+    px(ctx, x + 5, baseY - 4, 1, 2, '#c4bdb2');
+    if (frame % 4 < 2) px(ctx, x + 2, baseY - 7, 1, 1, '#b8bdc8');
+  } else if (kind === 1) { // tiny plant
+    px(ctx, x + 1, baseY - 3, 4, 3, '#9c5a2e');
+    px(ctx, x, baseY - 6, 2, 3, '#3f9a55');
+    px(ctx, x + 2, baseY - 7, 2, 4, '#4cb364');
+    px(ctx, x + 4, baseY - 5, 2, 2, '#3f9a55');
+  } else if (kind === 2) { // a small stack of books
+    px(ctx, x, baseY - 2, 7, 2, '#c0473a');
+    px(ctx, x + 1, baseY - 4, 6, 2, '#5d9ce0');
+    px(ctx, x, baseY - 6, 7, 2, '#5dc98a');
+  } else { // framed photo
+    px(ctx, x, baseY - 6, 6, 6, '#6b4a2e');
+    px(ctx, x + 1, baseY - 5, 4, 4, '#bfe3f5');
+    px(ctx, x + 2, baseY - 3, 2, 2, '#e0855d');
+  }
+}
+
+function drawPin(ctx, x, y, seed) {
+  const flags = [
+    ['#c0473a', '#ffffff', '#3a5bbf'], // tricolor-ish
+    ['#3a5bbf', '#ffffff', '#3a5bbf'],
+    ['#2e7d4f', '#ffffff', '#e0855d'],
+    ['#e0b05d', '#c0473a', '#2e5b8a'],
+  ];
+  const f = flags[hashInt('f' + seed) % flags.length];
+  px(ctx, x, y, 9, 6, '#ffffff');
+  px(ctx, x, y, 3, 6, f[0]);
+  px(ctx, x + 3, y, 3, 6, f[1]);
+  px(ctx, x + 6, y, 3, 6, f[2]);
+  px(ctx, x, y, 9, 1, 'rgba(255,255,255,0.3)');
+  px(ctx, x + 4, y - 1, 1, 1, '#888'); // pin
+}
+
+function drawStickies(ctx, x, y, seed) {
+  const cols = ['#f4d35e', '#9ad5e0', '#e8a0c0', '#a8e0a0'];
+  const n = 1 + (hashInt('st' + seed) % 3);
+  for (let i = 0; i < n; i++) {
+    const c = cols[(hashInt('sc' + seed + i)) % cols.length];
+    px(ctx, x + (i % 2) * 6, y + (i >> 1) * 6, 5, 5, c);
+    px(ctx, x + (i % 2) * 6, y + (i >> 1) * 6, 5, 1, shade(c, 20));
+  }
+}
+
+function drawMinion(ctx, x, feetY, bob) {
+  const y = feetY - bob;
+  px(ctx, x + 1, y - 9, 4, 2, '#1f2a33');
+  px(ctx, x + 1, y - 8, 4, 3, '#f0c8a0');
+  px(ctx, x + 2, y - 7, 1, 1, '#10141a');
+  px(ctx, x, y - 5, 6, 4, '#2bb0aa');
+  px(ctx, x + 4, y - 5, 2, 4, '#1f8a85');
+  px(ctx, x + 1, y - 1, 1, 1, '#171b22');
+  px(ctx, x + 4, y - 1, 1, 1, '#171b22');
+}
+
+function drawRing(ctx, x, y, w, h, color, frame, strong) {
   const L = 7;
-  ctx.globalAlpha = strong ? 1 : 0.55;
+  ctx.globalAlpha = strong ? 1 : 0.6;
   ctx.fillStyle = color;
-  // four L-shaped corner brackets
-  ctx.fillRect(x0, y0, L, 1); ctx.fillRect(x0, y0, 1, L); // top-left
-  ctx.fillRect(x1 - L + 1, y0, L, 1); ctx.fillRect(x1, y0, 1, L); // top-right
-  ctx.fillRect(x0, y1, L, 1); ctx.fillRect(x0, y1 - L + 1, 1, L); // bottom-left
-  ctx.fillRect(x1 - L + 1, y1, L, 1); ctx.fillRect(x1, y1 - L + 1, 1, L); // bottom-right
-  if (strong) {
-    ctx.globalAlpha = frame % 4 < 2 ? 0.18 : 0.1; // gentle pulse
-    ctx.fillRect(x0, y0, x1 - x0, 1); ctx.fillRect(x0, y1, x1 - x0, 1);
-    ctx.fillRect(x0, y0, 1, y1 - y0); ctx.fillRect(x1, y0, 1, y1 - y0);
+  const x1 = x + w - 1, y1 = y + h - 1;
+  ctx.fillRect(x, y, L, 1); ctx.fillRect(x, y, 1, L);
+  ctx.fillRect(x1 - L + 1, y, L, 1); ctx.fillRect(x1, y, 1, L);
+  ctx.fillRect(x, y1, L, 1); ctx.fillRect(x, y1 - L + 1, 1, L);
+  ctx.fillRect(x1 - L + 1, y1, L, 1); ctx.fillRect(x1, y1 - L + 1, 1, L);
+  if (strong && frame % 4 < 2) {
+    ctx.globalAlpha = 0.14;
+    ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y1, w, 1);
+    ctx.fillRect(x, y, 1, h); ctx.fillRect(x1, y, 1, h);
   }
   ctx.globalAlpha = 1;
 }
 
-// The PM / team lead's distinct marker: a small gold crown bobbing above the
-// head, so the orchestrator reads as "in charge" at a glance vs the workers.
-//
-// ponytail: this is the PM's look — a deliberately SIMPLE default. To restyle
-// (gold ring, "LEAD" pennant, halo, larger desk, …) swap THIS one function;
-// nothing else encodes the lead's appearance. cx = worker center x, podTopY =
-// pod top in buffer coords.
-export function drawLeadBadge(ctx, cx, podTopY, frame) {
-  const bob = frame % 8 < 4 ? 0 : 1;
-  const y = podTopY - 8 - bob;
-  const g = '#ffd166', hl = '#fff0c0', dk = '#c79a2e';
-  // crown band
-  px(ctx, cx - 4, y + 4, 9, 2, g);
-  px(ctx, cx - 4, y + 5, 9, 1, dk); // base shade
-  // three points with little gem dots
-  px(ctx, cx - 4, y + 1, 2, 3, g);
-  px(ctx, cx, y, 2, 4, g);
-  px(ctx, cx + 4, y + 1, 2, 3, g);
-  px(ctx, cx - 4, y + 1, 1, 1, hl); // highlights
-  px(ctx, cx, y, 1, 1, hl);
-  px(ctx, cx, y + 2, 1, 1, '#ff5cba'); // center gem
-}
-
-// "Needs you" indicator — a pulsing amber speech bubble with a "!" floating at
-// the agent's upper-right (clear of the crown/plumbob which sit centred above
-// the head), so an agent awaiting the user's reply (Control sets
-// agent.awaitingReply) reads as "blocked on you" across the floor.
-// cx = worker center x; podTopY = pod top in buffer coords.
-export function drawNeedsYou(ctx, cx, podTopY, frame) {
+// "Waiting on you" — an amber speech bubble with a "!" bobbing up-right of the
+// head, with a soft pulsing halo. The floor's highest-signal state (a background
+// agent blocked on the user). (cx, headTopY) = head centre-x, head-top y.
+export function drawNeedsYou(ctx, cx, headTopY, frame) {
   const bob = frame % 6 < 3 ? 0 : 1;
   const bx = cx + 8; // offset right of the head
-  const y = podTopY - 6 - bob;
+  const y = headTopY - 6 - bob;
   // soft pulsing halo behind the bubble
   ctx.globalAlpha = frame % 8 < 4 ? 0.34 : 0.16;
   px(ctx, bx - 2, y - 1, 16, 13, '#ffb454');
   ctx.globalAlpha = 1;
   // amber bubble body + a little tail pointing down toward the head
   px(ctx, bx - 1, y, 12, 9, '#ffb454');
-  px(ctx, bx - 1, y, 12, 1, '#ffd793'); // top highlight
+  px(ctx, bx - 1, y, 12, 1, '#ffd793');   // top highlight
   px(ctx, bx - 1, y + 8, 12, 1, '#e08a2a'); // bottom shade
   px(ctx, bx - 2, y + 2, 1, 5, '#ffb454'); // left round
   px(ctx, bx + 11, y + 2, 1, 5, '#e89030'); // right round
-  px(ctx, bx, y + 9, 3, 2, '#ffb454'); // tail toward the head
+  px(ctx, bx, y + 9, 3, 2, '#ffb454');     // tail toward the head
   px(ctx, bx, y + 11, 1, 1, '#e08a2a');
   // dark "!" glyph centred in the bubble
   px(ctx, bx + 4, y + 2, 2, 4, '#3a2606');
   px(ctx, bx + 4, y + 7, 2, 1, '#3a2606');
 }
 
-// A little bobbing green plumbob hovering above the selected worker's head.
-export function drawPlumbob(ctx, cx, podTopY, frame) {
+// PM crown — a small gold crown bobbing above the lead's head.
+export function drawCrown(ctx, cx, headTopY, frame) {
   const bob = frame % 8 < 4 ? 0 : 1;
-  const y = podTopY - 7 - bob;
-  const g = '#39d98a', hl = '#9affc4', dk = '#1f8a5a';
-  px(ctx, cx - 1, y, 2, 1, g);
-  px(ctx, cx - 2, y + 1, 4, 1, g);
-  px(ctx, cx - 3, y + 2, 6, 1, g);
-  px(ctx, cx - 2, y + 3, 4, 1, g);
-  px(ctx, cx - 1, y + 4, 2, 1, g);
-  px(ctx, cx - 1, y + 1, 1, 2, hl); // highlight
-  px(ctx, cx + 1, y + 2, 1, 1, dk); // shade
+  const y = headTopY - 7 - bob;
+  const g = '#ffd166', hl = '#fff0c0', dk = '#c79a2e';
+  px(ctx, cx - 4, y + 4, 9, 2, g);
+  px(ctx, cx - 4, y + 5, 9, 1, dk);
+  px(ctx, cx - 4, y + 1, 2, 3, g);
+  px(ctx, cx, y, 2, 4, g);
+  px(ctx, cx + 4, y + 1, 2, 3, g);
+  px(ctx, cx - 4, y + 1, 1, 1, hl);
+  px(ctx, cx, y, 1, 1, hl);
+  px(ctx, cx, y + 2, 1, 1, '#ff5cba');
 }

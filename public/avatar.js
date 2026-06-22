@@ -2,13 +2,18 @@
 // "player" character around the floor with WASD / arrow keys, walks up to an
 // agent's desk, and the existing chat panel surfaces what that agent is doing.
 //
+// DORMANT: this module is PRESERVED for a future idle-wander / walkable-avatar
+// feature but is not wired into the live office today (its former caller,
+// render.js, was deleted when proc became the sole renderer). The walk-cycle
+// code below is intentionally kept intact + self-contained.
+//
 // SELF-CONTAINED: this module owns the avatar's position, input, animation and
 // proximity logic. It draws in the SAME buffer coordinates a worker uses (the
-// render.js camera transform is applied by CSS to the whole world, so a buffer-
-// space draw lands correctly), reusing the office's own character pipeline
-// (characters.js + the dev-auburn walk atlas) so the avatar matches the art.
+// office camera transform is applied by CSS to the whole world, so a buffer-
+// space draw lands correctly), reusing its own inlined character pipeline (the
+// dev-auburn walk atlas) so the avatar matches the art.
 //
-// SEAM CONTRACT (what render.js calls — see the report / wiring notes):
+// SEAM CONTRACT (how a renderer would drive it):
 //   const avatar = createAvatar();                  // once, after initOffice
 //   avatar.update(dtMs, { podPositions, bounds });  // each frame, before draw
 //   avatar.draw(ctx);                               // each frame, after workers
@@ -17,14 +22,127 @@
 //   getters: avatar.pos {x,y} · avatar.nearestAgentIndex (int|null) · avatar.enabled (settable)
 //
 // PROXIMITY → INSPECT: when the avatar walks into a desk's radius it dispatches
-// the EXISTING `agency:select` CustomEvent (detail `{ agent }`, matching
-// render.js) so the chat panel reacts exactly as it does for a click. Debounced:
-// it fires only when ENTERING a new desk's zone, and clears (agent:null) on exit.
+// the EXISTING `agency:select` CustomEvent (detail `{ agent }`) so the chat panel
+// reacts exactly as it does for a click. Debounced: it fires only when ENTERING a
+// new desk's zone, and clears (agent:null) on exit.
 //
-// CAMERA-FOLLOW is intentionally NOT here — render.js owns the camera. This
-// module just exposes `pos` so render.js can optionally center on it.
+// CAMERA-FOLLOW is intentionally NOT here — a host renderer owns the camera. This
+// module just exposes `pos` so a renderer can optionally center on it.
 
-import { loadCharacter, drawCharacterState } from './characters.js';
+// Walk-cycle character pipeline — inlined here (formerly characters.js) so the
+// avatar's animated walk atlas survives independently. Only the ANIMATED path is
+// needed: the avatar always loads a generated atlas JSON (dev-auburn.json), never
+// a static office-sheet sprite, so the sheet-blit path doesn't come along.
+
+// Default cadences for any anim a sheet doesn't specify an fps for.
+const DEFAULT_FPS = { idle: 2, type: 6, walk: 8 };
+
+// Load an animated character: fetch its JSON atlas, normalize to the contract,
+// and load its PNG. Resolves to { kind:'animated', atlas, img } or null on any
+// failure (fail-soft so a missing/half-generated atlas never throws).
+async function loadCharacter(jsonUrl) {
+  try {
+    const res = await fetch(jsonUrl);
+    if (!res.ok) return null;
+    const raw = await res.json();
+    const atlas = normalizeAtlas(raw, jsonUrl);
+    if (!atlas) return null;
+    const img = await loadImage(resolveImageUrl(jsonUrl, atlas.image));
+    if (!img) return null;
+    return { kind: 'animated', atlas, img };
+  } catch {
+    return null;
+  }
+}
+
+// Resolve the sheet path relative to the JSON's directory so an atlas can name
+// its image as a bare filename ("auburn-walk.png").
+function resolveImageUrl(jsonUrl, image) {
+  if (!image) return null;
+  if (/^(https?:)?\//.test(image)) return image;
+  const dir = jsonUrl.replace(/[^/]*$/, '');
+  return dir + image;
+}
+
+function loadImage(src) {
+  return new Promise((resolve) => {
+    if (!src) { resolve(null); return; }
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+// Bring an emitted atlas into the canonical shape. Tolerates the dev fixture
+// (no name/fps, has rows/frameCount, only a walk anim) and fills sane defaults.
+function normalizeAtlas(raw, jsonUrl) {
+  if (!raw || !raw.cellW || !raw.cellH) return null;
+  const cols = raw.cols || raw.columns || 1;
+  const anims = { ...(raw.anims || {}) };
+  // A sheet with no named anims at all (just a frame strip) → treat the whole
+  // strip as a single looping anim usable for every state.
+  if (!anims.idle && !anims.type && !anims.walk) {
+    const count = raw.frameCount || cols * (raw.rows || 1);
+    const all = Array.from({ length: count }, (_, i) => i);
+    anims.idle = anims.type = anims.walk = all;
+  }
+  // Fall back any missing state to whatever the sheet does have.
+  const have = anims.idle || anims.type || anims.walk || [0];
+  anims.idle = anims.idle && anims.idle.length ? anims.idle : have;
+  anims.type = anims.type && anims.type.length ? anims.type : (anims.idle || have);
+  anims.walk = anims.walk && anims.walk.length ? anims.walk : have;
+  const fps = { ...DEFAULT_FPS, ...(raw.fps || {}) };
+  return {
+    name: raw.name || jsonUrl.replace(/.*\//, '').replace(/\.json$/, ''),
+    image: raw.image,
+    cellW: raw.cellW,
+    cellH: raw.cellH,
+    cols,
+    anchorX: raw.anchorX != null ? raw.anchorX : Math.floor(raw.cellW / 2),
+    anchorY: raw.anchorY != null ? raw.anchorY : raw.cellH - 1,
+    anims,
+    fps,
+  };
+}
+
+// Pick the frame index for an animated state from a shared clock. `clockMs` is a
+// monotonic time; we advance through anims[state] at the state's fps. `phase`
+// desyncs identical characters so a row doesn't keystroke in lockstep.
+function frameForState({ atlas, state = 'idle', clockMs = 0, phase = 0 }) {
+  const a = atlas.anims[state] || atlas.anims.idle || [0];
+  if (a.length <= 1) return a[0] || 0;
+  const fps = atlas.fps[state] || DEFAULT_FPS[state] || 4;
+  const step = Math.floor(clockMs / (1000 / fps)) + (phase | 0);
+  return a[((step % a.length) + a.length) % a.length];
+}
+
+// Draw one animated character cell so its anchor lands at (screenX, baselineY).
+function drawCharacter(ctx, screenX, baselineY, atlas, img, state, frame) {
+  if (!atlas || !img || !img.complete || !img.naturalWidth) return;
+  const { cellW, cellH, cols, anchorX, anchorY } = atlas;
+  const f = frame | 0;
+  const col = ((f % cols) + cols) % cols;
+  const row = Math.floor(f / cols);
+  const sx = col * cellW;
+  const sy = row * cellH;
+  const dx = Math.round(screenX - anchorX);
+  const dy = Math.round(baselineY - anchorY);
+  const prevSmooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, sx, sy, cellW, cellH, dx, dy, cellW, cellH);
+  ctx.imageSmoothingEnabled = prevSmooth;
+}
+
+// Draw any character with its anchor at (screenX, baselineY). The avatar only
+// ever feeds an animated atlas; static sheet sprites are not supported here.
+function drawCharacterState(ctx, screenX, baselineY, char, { state = 'idle', clockMs = 0, phase = 0 } = {}) {
+  if (!char) return;
+  if (char.atlas && char.img) {
+    const frame = frameForState({ atlas: char.atlas, state, clockMs, phase });
+    drawCharacter(ctx, screenX, baselineY, char.atlas, char.img, state, frame);
+  }
+}
 
 // The avatar borrows the office's own generated walk atlas (side-profile walk
 // cycle + idle frames). Path is relative to /public so it works under the static
@@ -40,7 +158,7 @@ const SPEED = 92;            // buffer px / second
 const PROXIMITY_R = 46;      // enter this radius of a desk centre → inspect it
 const PROXIMITY_EXIT_R = 60; // leave beyond this (hysteresis so it doesn't flap)
 
-// Desk hit geometry mirrors render.js: podOrigin is a pod's top-left and the
+// Desk hit geometry mirrors the office: podOrigin is a pod's top-left and the
 // person/desk sit around its centre. We measure proximity to a point a little
 // below the pod centre (the desk/chair the worker occupies), not the slot corner.
 const POD_W = 64, POD_H = 92;
@@ -102,7 +220,7 @@ class Avatar {
     }
   }
 
-  // Tear-down for completeness (render.js never destroys it, but the harness can).
+  // Tear-down for completeness (nothing wires it up today, but the harness can).
   destroy() {
     window.removeEventListener('keydown', this._onKeyDown);
     window.removeEventListener('keyup', this._onKeyUp);
@@ -223,7 +341,7 @@ class Avatar {
   }
 
   // Set (or clear) the inspected desk. Fires agency:select with the new desk's
-  // agent (the same event render.js uses on a click) — or agent:null on clear —
+  // agent (the same event a desk click uses) — or agent:null on clear —
   // only on an actual change, so the chat panel tracks the avatar without churn.
   _setInspection(p) {
     const nextIndex = p ? p.i : null;
@@ -236,7 +354,7 @@ class Avatar {
 
   // ---- draw ----------------------------------------------------------------
 
-  // Draw the avatar at its buffer (x,y) — the camera is applied by render.js via
+  // Draw the avatar at its buffer (x,y) — the camera is applied by the office via
   // CSS, so we draw in buffer coords exactly like a worker. Layers: a soft floor
   // shadow, the character sprite (flipped when facing left), then a "YOU" marker
   // (bobbing arrow + label) above the head so the player reads as the user.
@@ -329,7 +447,7 @@ class Avatar {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-// Dispatch the EXACT event render.js dispatches on a desk click, so the chat
+// Dispatch the EXACT event a desk click dispatches, so the chat
 // panel surfaces the agent the avatar walked up to (or clears on exit).
 function dispatchSelect(agent) {
   window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: agent || null } }));

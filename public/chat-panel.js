@@ -1,6 +1,6 @@
 // chat-panel.js — read-only "open this agent's status" side panel.
 //
-// Listens for an `agency:select` CustomEvent (dispatched by render.js when a
+// Listens for an `agency:select` CustomEvent (dispatched by office.js when a
 // desk is clicked) and slides in a panel that summarizes the selected agent's
 // truthful status. For a real Claude session it leads with a STATUS + METRICS
 // card (honest state from the agent itself + a 30-min activity readout fetched
@@ -17,7 +17,7 @@
 //   - opencode / codex agents → no Claude transcript on disk; show a short note.
 //
 // This module owns no render/camera state; it is a pure consumer of the
-// selection event, so it stays decoupled from render.js.
+// selection event, so it stays decoupled from office.js.
 
 const PANEL_ID = 'chatPanel';
 
@@ -36,7 +36,7 @@ function esc(s) {
   );
 }
 
-// Stable per-agent key, mirroring render.js's keyOf so selection lines up.
+// Stable per-agent key, mirroring office.js's keyOf so selection lines up.
 function keyOf(a) {
   if (!a) return null;
   return a.sessionId || (a.pid != null ? `pid:${a.pid}` : null);
@@ -273,7 +273,7 @@ function renderNote(html) {
 // sessions, teammates, opencode, codex). Both controls persist server-side via
 // POST /api/agent-override and only WRITE the field they touch:
 //   • RENAME → { sessionId, name }  (name:"" resets to the minted roster name)
-//   • HIDE   → { sessionId, hidden } (toggles agent.hidden; render.js owns state)
+//   • HIDE   → { sessionId, hidden } (toggles agent.hidden; office.js owns state)
 // Each control flashes a transient confirmation on its own button, mirroring the
 // copyButton / openTerminalButton pattern, and never throws on a failed/non-JSON
 // response (we guard the .json() like openTerminalButton does).
@@ -337,7 +337,7 @@ function customizeControls(a) {
   hide.title = 'Hide this agent from the office floor';
   hide.addEventListener('click', () => {
     const next = !a.hidden;
-    a.hidden = next; // optimistic; render.js reconciles on the next poll
+    a.hidden = next; // optimistic; office.js reconciles on the next poll
     const prev = labelFor(next);
     postOverride(hide, { sessionId: a.sessionId, hidden: next }, prev);
   });
@@ -377,7 +377,7 @@ function statusBits(a) {
 }
 
 // Render the live "current action" line from a transcript lastAction object,
-// e.g. "Editing render.js" / "Running npm test". Returns '' when we have none.
+// e.g. "Editing app.js" / "Running npm test". Returns '' when we have none.
 function actionLine(lastAction) {
   if (!lastAction || !lastAction.verb) return '';
   const verb = esc(lastAction.verb);

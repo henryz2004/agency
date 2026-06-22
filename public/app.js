@@ -2,7 +2,7 @@
 // "manpower" translation + comparison panels. All manpower math is client-side
 // so the assumption sliders update everything instantly.
 
-import * as sheetOffice from './render.js';
+import { initOffice, setAgents } from './office.js';
 import { drawHead, colorFor } from './sprites.js';
 import { initSoundPref, toggleSound, updateSound } from './sound.js';
 import { initUI } from './ui.js';
@@ -10,15 +10,6 @@ import { mockEnabled, getMockState } from './mock.js';
 import { initChatPanel } from './chat-panel.js';
 
 const $ = (id) => document.getElementById(id);
-
-// Renderer is swappable: ?render=proc loads the fully-procedural office
-// (proc-office.js), anything else uses the default sheet office (render.js).
-// Both expose initOffice(canvas, labels) + setAgents(agents) over the same
-// /api/state agent shape, so the rest of app.js is render-mode-agnostic.
-const officeMod = new URLSearchParams(location.search).get('render') === 'proc'
-  ? await import('./proc-office.js')
-  : sheetOffice;
-const { initOffice, setAgents } = officeMod;
 
 const office = $('office');
 const labels = $('labels');
@@ -225,7 +216,7 @@ function fmtBurn(n) {
 // it's "unread". We watch per-sessionId activity across polls and only mark
 // unread on an OBSERVED active→idle transition — an agent already idle on first
 // load is NOT unread (no false positives). The set is surfaced as a topbar count
-// and exposed for an on-floor per-desk badge built later in proc-office.js:
+// and exposed for an on-floor per-desk badge built in office.js:
 //   - window.agencyUnread        : live Set<sessionId>, refreshed each poll
 //   - 'agency:unread' CustomEvent: { detail: { ids: [...] } }, fired on change
 // Viewing an agent (the existing agency:select event) clears its unread.
@@ -233,7 +224,7 @@ function fmtBurn(n) {
 // a refresh) is the upgrade.
 const lastActivity = new Map(); // sessionId -> last seen activity
 const unreadIds = new Set(); // sessionIds that just finished and aren't viewed yet
-window.agencyUnread = unreadIds; // expose for proc-office.js per-desk badge
+window.agencyUnread = unreadIds; // expose for office.js per-desk badge
 
 function isActive(activity) {
   return activity === 'working' || activity === 'shell';
@@ -327,7 +318,7 @@ window.addEventListener('agency:select', (e) => {
 // A non-intrusive pill in the topbar showing how many agents are paused on a
 // Stop hook waiting for a reply. Clicking it selects the first waiter, which
 // opens the chat panel with the reply box (via the same agency:select event the
-// renderer uses). The on-canvas per-agent indicator lives in render.js; this is
+// renderer uses). The on-canvas per-agent indicator lives in office.js; this is
 // just the at-a-glance count.
 let waitingPill = null;
 

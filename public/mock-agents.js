@@ -64,7 +64,7 @@ export function makeAgents(n, seed = 7) {
       startedAt: Date.now() - Math.floor(r() * 6 * 3600 * 1000),
     });
   }
-  // Group by project so co-located agents are adjacent (mirrors render.js).
+  // Group by project so co-located agents are adjacent (mirrors office.js).
   out.sort((a, b) => a.project.localeCompare(b.project));
   return out;
 }

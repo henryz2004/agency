@@ -1,7 +1,7 @@
 // ui.js — wires the hovering/collapsible stats panel to the renderer. The
-// office camera (pan / zoom / recenter) is driven by gestures inside render.js.
+// office camera (pan / zoom / recenter) is driven by gestures inside office.js.
 
-import { setReservedRight } from './render.js';
+import { setReservedRight } from './office.js';
 
 const $ = (id) => document.getElementById(id);
 const GAP = 16; // breathing room between the office and the panel

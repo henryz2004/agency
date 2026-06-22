@@ -148,7 +148,7 @@
 .cp-act-win { color: var(--muted2); }
 .cp-activity.idle .cp-act-metrics { color: var(--muted); }
 
-/* the live action line: "doing now Editing render.js". Empty (collapsed) when
+/* the live action line: "doing now Editing app.js". Empty (collapsed) when
    no tool is in flight, so an idle agent shows nothing here. */
 .cp-act-now {
   font-size: 16px; line-height: 1.35; color: var(--muted);
