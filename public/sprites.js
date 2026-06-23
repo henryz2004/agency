@@ -346,30 +346,32 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   // hair + head + face + neck (shared with the standing drawWalker)
   drawHeadFace(ctx, cx, hy, look, blink);
 
-  // --- torso (shirt) ---
+  // --- torso (shirt) --- slimmed so the worker reads as a compact little person
+  // rather than a wide block: shoulders taper from the neck, body ~13 wide (was
+  // 15) and a touch shorter. (The desk hides the lower half on a seated worker.)
   const ty = fy + 12 - breath;
-  px(ctx, cx - 6, ty, 13, 3, shirt);
-  px(ctx, cx - 7, ty + 3, 15, 9, shirt);
-  px(ctx, cx + 4, ty, 4, 12, shade(shirt, -26)); // right-side shade
-  px(ctx, cx - 1, ty, 2, 12, shade(shirt, 18));  // collar/placket
+  px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders (tapered in)
+  px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
+  px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26)); // right-side shade
+  px(ctx, cx - 1, ty, 2, 11, shade(shirt, 18));   // collar/placket
   // arms. A just-finished UNREAD worker raises its right arm and waves to catch
   // your eye (left arm stays at the desk); reads as "I'm done, come look" — and
   // pops against the now-still idle pose. Otherwise: arms to the desk, hands
   // bobbing while typing.
   if (unread && !typing && !shellRunning) {
     const wig = frame % 4 < 2 ? 0 : 2; // slow side-to-side hand wiggle (~2 Hz)
-    px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));  // left arm down
-    px(ctx, cx - 9, ty + 11, 3, 2, skin);              // left hand at desk
-    px(ctx, cx + 7, ty, 3, 5, shade(shirt, -12));      // right upper arm, raised
-    px(ctx, cx + 9, ty - 5, 2, 6, shade(shirt, -12));  // right forearm up
-    px(ctx, cx + 8 + wig, ty - 9, 3, 3, skin);         // waving hand
+    px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12)); // left arm down
+    px(ctx, cx - 8, ty + 10, 2, 2, skin);             // left hand at desk
+    px(ctx, cx + 6, ty, 2, 5, shade(shirt, -12));     // right upper arm, raised
+    px(ctx, cx + 7, ty - 5, 2, 6, shade(shirt, -12)); // right forearm up
+    px(ctx, cx + 6 + wig, ty - 9, 3, 3, skin);        // waving hand
   } else {
     const lh = typing && frame % 2 ? 1 : 0;
     const rh = typing && frame % 2 ? 0 : 1;
-    px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
-    px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
-    px(ctx, cx - 9, ty + 11 + (typing ? lh : 0), 3, 2, skin); // hands
-    px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
+    px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12));
+    px(ctx, cx + 6, ty + 3, 2, 7, shade(shirt, -12));
+    px(ctx, cx - 8, ty + 10 + (typing ? lh : 0), 2, 2, skin); // hands
+    px(ctx, cx + 6, ty + 10 + (typing ? rh : 0), 2, 2, skin);
   }
 }
 
@@ -388,19 +390,19 @@ export function drawWalker(ctx, cx, feetY, opts = {}) {
   const ty = feetY - 19 - bob;          // torso top
   const hy = ty - 16;                   // head top (neck lands back at ty)
   drawHeadFace(ctx, cx, hy, look, blink);
-  // torso (shirt) — same shapes as the seated worker
-  px(ctx, cx - 6, ty, 13, 3, shirt);
-  px(ctx, cx - 7, ty + 3, 15, 9, shirt);
-  px(ctx, cx + 4, ty, 4, 12, shade(shirt, -26));
-  px(ctx, cx - 1, ty, 2, 12, shade(shirt, 18));
-  // arms hanging at the sides
-  px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
-  px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
-  px(ctx, cx - 9, ty + 11, 3, 2, skin);
-  px(ctx, cx + 7, ty + 11, 3, 2, skin);
+  // torso (shirt) — slimmed to match the seated worker (compact, not a block)
+  px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders
+  px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
+  px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26));
+  px(ctx, cx - 1, ty, 2, 11, shade(shirt, 18));
+  // arms hanging at the sides (thinner)
+  px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12));
+  px(ctx, cx + 6, ty + 3, 2, 7, shade(shirt, -12));
+  px(ctx, cx - 8, ty + 10, 2, 2, skin);
+  px(ctx, cx + 6, ty + 10, 2, 2, skin);
   // legs (pants, darker than the shirt) + an alternating walk stride
   const pants = shade(shirt, -55);
-  const legTop = ty + 12, legH = feetY - legTop;
+  const legTop = ty + 11, legH = feetY - legTop;
   const lLift = walking && frame % 4 < 2 ? 1 : 0;
   const rLift = walking && frame % 4 < 2 ? 0 : 1;
   px(ctx, cx - 4, legTop + lLift, 3, legH - lLift, pants);
