@@ -9,6 +9,7 @@ import {
   drawWall, drawFloor, drawDaylight, moodForHour,
   drawCubicle, drawCrown, drawNeedsYou, CELL_W, CELL_H,
 } from './sprites.js';
+import { createAvatar } from './avatar.js';
 
 const WALL_H = 70;                 // cream wall band; fills from the top of canvas
 const TOP = WALL_H;                // floor starts here (no sky)
@@ -25,6 +26,12 @@ let agents = [];
 let clusters = [];   // {x, y, w, h, count, firstAgent, project, seed}
 let decor = [];      // {type, x, y, w, h, seed}
 let cells = [];      // {x, y, agent} — flattened, in draw order
+
+// ---- floor entities: the walkable user avatar + a wandering cat -------------
+let avatar = null;                  // the player (created in initOffice, off by default)
+let lastT = 0;                      // last loop timestamp → real dt for motion
+let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built in JS)
+const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false }; // roaming pet
 
 // DOM overlay layer: real (crisp) HTML text for the name chips + repo labels,
 // instead of canvas pixel text. One wrapper div over the canvas, scaled by
@@ -187,7 +194,7 @@ function plan() {
   // kitchen counter standing against the back wall on the far right
   decor.push({ type: 'kitchen', x: bufW - 84, y: TOP - 1, w: 78, h: 30, seed: 999 });
   // a cat and a dog lounging on the open floor of the band
-  decor.push({ type: 'cat', x: MARGIN + 10, y: bandY + LOUNGE_BAND_H - 6, seed: 5 });
+  // (the cat is no longer static decor — it roams the floor; see updateCat/drawCat)
   decor.push({ type: 'dog', x: bufW - 60, y: bandY + LOUNGE_BAND_H - 4, seed: 9 });
 }
 
@@ -810,6 +817,118 @@ function attachInput() {
   window.addEventListener('agency:unread', () => syncLabels());
 }
 
+// ---- floor entities: avatar (walkable player) + wandering cat ---------------
+
+// Desks in the avatar's expected shape: pod top-left (cell x,y) + the agent.
+function buildPods() {
+  return cells.map((c, i) => ({ x: c.x, y: c.y, i, agent: c.agent }));
+}
+
+// Walkable floor extents in buffer coords (inside the walls + margins).
+function floorBounds() {
+  return { minX: MARGIN + 8, maxX: bufW - MARGIN - 8, minY: TOP + 14, maxY: bufH - MARGIN - 6 };
+}
+
+// Center the camera on the avatar (lerped catch-up) so it follows while walking.
+// Mutates cam WITHOUT setting userMoved, so toggling walk off restores fit/pan.
+function followAvatar() {
+  if (!avatar) return;
+  const vp = viewportRect();
+  const availW = Math.max(40, vp.width - reservedRight);
+  const eff = UPSCALE * cam.s;
+  const tx = availW / 2 - avatar.pos.x * eff;
+  const ty = vp.height / 2 - avatar.pos.y * eff;
+  cam.x += (tx - cam.x) * 0.18;
+  cam.y += (ty - cam.y) * 0.18;
+  clampPan();
+  applyCam();
+}
+
+// Toggle walk mode (the 'g' key / the button). On enable, drop the avatar at the
+// current view centre (so it appears where you're looking) clamped to the floor.
+function toggleWalk(on) {
+  if (!avatar) return;
+  avatar.enabled = on == null ? !avatar.enabled : !!on;
+  if (avatar.enabled) {
+    const vp = viewportRect();
+    const eff = UPSCALE * cam.s;
+    const b = floorBounds();
+    avatar.setPos(
+      clampN((vp.width / 2 - cam.x) / eff, b.minX, b.maxX),
+      clampN((vp.height / 2 - cam.y) / eff, b.minY, b.maxY)
+    );
+  }
+  updateWalkUI();
+}
+
+function updateWalkUI() {
+  const on = !!(avatar && avatar.enabled);
+  if (walkBtn) {
+    walkBtn.textContent = on ? '🚶 walking · G to exit' : '🚶 walk (G)';
+    walkBtn.style.borderColor = on ? '#ff2e88' : 'rgba(255,255,255,0.14)';
+    walkBtn.style.color = on ? '#ff8fc4' : '#cdd6e6';
+  }
+  if (walkHint) walkHint.style.display = on ? 'block' : 'none';
+}
+
+// Build the small walk affordances (a toggle button + a hint) over the floor
+// frame, styled inline (index.html / style.css aren't in this lane).
+function ensureWalkUI() {
+  const host = world && world.parentElement; // .floor-frame
+  if (!host || walkBtn) return;
+  walkBtn = document.createElement('button');
+  walkBtn.type = 'button';
+  walkBtn.id = 'walkToggle';
+  Object.assign(walkBtn.style, {
+    position: 'absolute', left: '12px', bottom: '12px', zIndex: '6',
+    font: '11px ui-monospace, monospace', background: 'rgba(16,20,28,0.82)',
+    border: '1px solid rgba(255,255,255,0.14)', borderRadius: '6px',
+    padding: '5px 9px', cursor: 'pointer',
+  });
+  walkBtn.addEventListener('click', () => toggleWalk());
+  host.appendChild(walkBtn);
+  walkHint = document.createElement('div');
+  Object.assign(walkHint.style, {
+    position: 'absolute', left: '12px', bottom: '40px', zIndex: '6',
+    font: '11px ui-monospace, monospace', color: '#9aa6ba',
+    background: 'rgba(16,20,28,0.82)', border: '1px solid rgba(255,255,255,0.10)',
+    borderRadius: '6px', padding: '4px 8px', display: 'none', maxWidth: '250px',
+  });
+  walkHint.textContent = 'WASD / arrows to move · walk up to a desk to open it · G to exit';
+  host.appendChild(walkHint);
+  updateWalkUI();
+}
+
+// Gently roam a cat across the lower floor (the lounge): pick a target, amble to
+// it, sit a while, repeat. Subtle ambient life; runs every loop tick.
+function updateCat(dt, now) {
+  if (!bufW || !bufH) return;
+  const minX = MARGIN + 12, maxX = bufW - MARGIN - 14;
+  const minY = Math.round(bufH * 0.66), maxY = bufH - MARGIN - 6;
+  if (!cat.init) {
+    cat.x = minX + 8; cat.y = maxY - 2; cat.tx = cat.x; cat.ty = cat.y;
+    cat.sit = true; cat.until = now + 1500; cat.init = true;
+  }
+  cat.x = clampN(cat.x, minX, maxX); cat.y = clampN(cat.y, minY, maxY); // re-clamp after a reshape
+  if (now >= cat.until) {
+    if (cat.sit) {
+      cat.sit = false;
+      cat.tx = minX + Math.round(Math.random() * (maxX - minX));
+      cat.ty = minY + Math.round(Math.random() * (maxY - minY));
+      cat.until = now + 5000 + Math.random() * 4000; // safety cap before it must rest
+    } else {
+      cat.sit = true; cat.until = now + 2200 + Math.random() * 4500; // rest a while
+    }
+  }
+  if (!cat.sit) {
+    const dx = cat.tx - cat.x, dy = cat.ty - cat.y, d = Math.hypot(dx, dy);
+    if (d > 1.2) {
+      const step = Math.min(14 * dt / 1000, d); // ~14 buffer px/s amble
+      cat.x += (dx / d) * step; cat.y += (dy / d) * step;
+    } else { cat.sit = true; cat.until = now + 1500 + Math.random() * 3000; }
+  }
+}
+
 // ---- scene -----------------------------------------------------------------
 function draw() {
   ctx.clearRect(0, 0, bufW, bufH);
@@ -837,6 +956,9 @@ function draw() {
     const a = cell.agent;
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
+  // Floor entities last, so the roaming pet + the player float above the desks.
+  if (cat.init) drawCat(cat.x, cat.y, frame);
+  if (avatar && avatar.enabled) avatar.draw(ctx);
 }
 
 // ---- public API ------------------------------------------------------------
@@ -858,6 +980,16 @@ export function initOffice(canvasEl, _labels) {
   ctx.imageSmoothingEnabled = false;
   world = canvas.parentElement; // the .world wrapper (absolute, transform-origin 0,0)
   attachInput();                // pan / zoom / click-to-open-chat
+
+  // Floor entities: the walkable player avatar (off by default) + its affordances.
+  avatar = createAvatar({ enabled: false });
+  ensureWalkUI();
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'g' && e.key !== 'G') return;
+    const t = e.target; // don't toggle while typing in the chat panel
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    toggleWalk();
+  });
 }
 
 export function init(canvasEl, n, seed) {
@@ -895,7 +1027,9 @@ function rebuild() {
   draw();       // repaint now — setting canvas.width cleared it (avoids a blank frame)
   syncLabels(); // (re)position the DOM name + repo + lead-tie labels + hidden chip
   // fit-to-view until the user pans/zooms, then respect their view.
-  if (!userMoved) fitView(); else applyCam();
+  // While walking, the camera is driven by followAvatar(); a poll-time re-fit
+  // would snap it away for one frame, so skip the auto-fit in walk mode.
+  if (!userMoved && !(avatar && avatar.enabled)) fitView(); else applyCam();
 }
 
 export function setAgents(next) {
@@ -907,10 +1041,19 @@ export function setAgents(next) {
 let raf, timer;
 function loop() {
   frame++;
+  const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const dt = lastT ? Math.min(now - lastT, 100) : 16; // clamp big tab-out gaps
+  lastT = now;
+  updateCat(dt, now);                // ambient — roams whether or not walk mode is on
+  if (avatar && avatar.enabled) {
+    avatar.update(dt, { podPositions: buildPods(), bounds: floorBounds() });
+    followAvatar();
+  }
   draw();
   raf = requestAnimationFrame(() => {
     if (!started) return;            // cancelled (reset) while the RAF was pending
-    timer = setTimeout(loop, 130);   // ~7.5fps pixel cadence
+    // Smooth (~30fps) while the player is walking; the calm ~7.5fps pixel cadence otherwise.
+    timer = setTimeout(loop, (avatar && avatar.enabled) ? 33 : 130);
   });
 }
 

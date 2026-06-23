@@ -22,6 +22,23 @@ let nextKeyAt = 0; // ctx.currentTime of the next scheduled keystroke
 // Keep the master volume LOW and tasteful.
 const MASTER_VOL = 0.18;
 
+// --- ambient music (procedural lo-fi pad) -----------------------------------
+// A slow, very quiet chord pad that drifts through a I–vi–ii–V progression via
+// smooth pitch glides (the oscillators never restart → seamless, no loop seam).
+// Its own warm lowpass + a slow "breathing" cutoff LFO give it lo-fi texture. It
+// shares the AudioContext with the SFX but has a SEPARATE path to destination, so
+// it never clashes with the keyboard clatter. Starts/stops with the sound toggle.
+const MUSIC_VOL = 0.16;      // pad bus gain — deliberately low (texture, not a song)
+const CHORD_MS = 11000;      // advance the chord every ~11s (slow drift)
+const CHORD_GLIDE = 4;       // seconds to glide between chords (no clicks)
+const CHORDS = [             // 4 voices each, mid register, warm close voicings
+  [261.63, 329.63, 392.00, 493.88], // Cmaj7  (C E G B)
+  [220.00, 261.63, 329.63, 392.00], // Am7    (A C E G)
+  [293.66, 349.23, 440.00, 523.25], // Dm7    (D F A C)
+  [196.00, 246.94, 293.66, 349.23], // G7     (G B D F)
+];
+let music = null;            // live pad graph, or null when off
+
 function loadPref() {
   try {
     return localStorage.getItem(PREF_KEY) === 'on';
@@ -125,6 +142,85 @@ function stopScheduler() {
   }
 }
 
+// Build + fade in the ambient pad. Needs a live AudioContext (so it's only ever
+// called from toggleSound, i.e. after a user gesture). Fail-soft: any Web Audio
+// hiccup just leaves the pad off without touching the SFX.
+function startMusic() {
+  if (music || !ctx) return;
+  try {
+    // a warm lowpass for the pad, its cutoff slowly "breathing" via an LFO
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    lp.Q.value = 0.6;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;        // start silent, fade in
+    lp.connect(gain);
+    gain.connect(ctx.destination);   // SEPARATE path from the SFX master
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.06;      // ~16s breath
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 260;        // cutoff sweeps ~640–1160 Hz
+    lfo.connect(lfoGain);
+    lfoGain.connect(lp.frequency);
+    lfo.start();
+    // four sustained pad voices (the opening chord), gently detuned for warmth
+    const voices = CHORDS[0].map((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      osc.detune.value = (i - 1.5) * 5; // -7.5..+7.5 cents → soft chorus
+      const vg = ctx.createGain();
+      vg.gain.value = 0.22;
+      osc.connect(vg);
+      vg.connect(lp);
+      osc.start();
+      return { osc };
+    });
+    music = { lp, gain, lfo, voices, chordIdx: 0, chordTimer: null };
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(MUSIC_VOL, t + 2.5); // gentle fade-in
+    music.chordTimer = setInterval(driftChord, CHORD_MS);  // seamless drift
+  } catch {
+    music = null; // fail-soft
+  }
+}
+
+// Glide every voice to the next chord's notes — smooth, no restart, no click.
+function driftChord() {
+  const m = music;
+  if (!m || !ctx) return;
+  m.chordIdx = (m.chordIdx + 1) % CHORDS.length;
+  const chord = CHORDS[m.chordIdx];
+  const t = ctx.currentTime;
+  m.voices.forEach((v, i) => {
+    v.osc.frequency.cancelScheduledValues(t);
+    v.osc.frequency.setValueAtTime(v.osc.frequency.value, t);
+    v.osc.frequency.linearRampToValueAtTime(chord[i], t + CHORD_GLIDE);
+  });
+}
+
+// Fade out + tear down the pad. Detaches `music` immediately so a quick re-enable
+// builds a fresh graph without colliding with this teardown.
+function stopMusic() {
+  const m = music;
+  if (!m) return;
+  music = null;
+  if (m.chordTimer) clearInterval(m.chordTimer);
+  if (!ctx) return;
+  try {
+    const t = ctx.currentTime;
+    m.gain.gain.cancelScheduledValues(t);
+    m.gain.gain.setValueAtTime(m.gain.gain.value, t);
+    m.gain.gain.linearRampToValueAtTime(0.0001, t + 0.3);
+    m.voices.forEach((v) => v.osc.stop(t + 0.4));
+    m.lfo.stop(t + 0.4);
+  } catch {
+    /* already gone — fail-soft */
+  }
+}
+
 // --- public API ------------------------------------------------------------
 
 export function isSoundEnabled() {
@@ -155,10 +251,13 @@ export function toggleSound() {
     ensureContext();
     if (ctx && ctx.state === 'suspended') ctx.resume();
     startScheduler();
+    startMusic(); // ambient pad rides alongside the clatter
   } else {
     stopScheduler();
-    // Drop scheduled tail by letting it fade naturally; suspend to save CPU.
-    if (ctx && ctx.state === 'running') ctx.suspend();
+    stopMusic();
+    // Defer the CPU-saving suspend so the music fade + clatter tail finish first
+    // (skipped if a quick re-enable raced us — guarded by the live `enabled`).
+    setTimeout(() => { if (!enabled && ctx && ctx.state === 'running') ctx.suspend(); }, 450);
   }
   return enabled;
 }

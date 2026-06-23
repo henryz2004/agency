@@ -29,6 +29,12 @@
 // CAMERA-FOLLOW is intentionally NOT here — a host renderer owns the camera. This
 // module just exposes `pos` so a renderer can optionally center on it.
 
+// The LIVE avatar draws as a front-facing proc worker (drawPerson) so it matches
+// the proc office art, with striding legs + a USER tag added on top (see draw()).
+// The animated-atlas pipeline below is the older side-profile path — kept DORMANT
+// (intentionally preserved) but no longer fed; drawPerson is the active body.
+import { drawPerson, px } from './sprites.js';
+
 // Walk-cycle character pipeline — inlined here (formerly characters.js) so the
 // avatar's animated walk atlas survives independently. Only the ANIMATED path is
 // needed: the avatar always loads a generated atlas JSON (dev-auburn.json), never
@@ -155,15 +161,17 @@ const AVATAR_ATLAS_URL = '/characters/dev-auburn.json';
 // brisk but controllable). The atlas anchor is the feet, so (x,y) is a FLOOR
 // point and we draw the sprite standing on it.
 const SPEED = 92;            // buffer px / second
+const AVATAR_SEED = 7;       // fixed appearance for the player's proc body
 const PROXIMITY_R = 46;      // enter this radius of a desk centre → inspect it
 const PROXIMITY_EXIT_R = 60; // leave beyond this (hysteresis so it doesn't flap)
 
-// Desk hit geometry mirrors the office: podOrigin is a pod's top-left and the
-// person/desk sit around its centre. We measure proximity to a point a little
-// below the pod centre (the desk/chair the worker occupies), not the slot corner.
-const POD_W = 64, POD_H = 92;
-const DESK_CX = POD_W / 2;   // 32 — pod-centre x offset
-const DESK_CY = 56;          // a touch below centre: the seat/desk, where the worker is
+// Desk hit geometry mirrors the office: buildPods() gives a cell's top-left and
+// the worker/desk sit at its centre, so we measure proximity to the cell centre.
+// Proc cells are CELL_W=58 x CELL_H=78 (NOT the old hybrid 64x92 pod), so the
+// centre offset is 29/39 — using the old 32/56 put the hot-spot ~17px too low.
+const POD_W = 64, POD_H = 92;  // legacy hybrid metrics, kept for the walk-speed note above
+const DESK_CX = 29;          // proc CELL_W/2 — desk-centre x offset from the cell top-left
+const DESK_CY = 39;          // proc CELL_H/2 — desk-centre y offset
 
 export function createAvatar(opts = {}) {
   return new Avatar(opts);
@@ -194,10 +202,7 @@ class Avatar {
     // multiple keys combine (diagonals) and key-repeat doesn't matter.
     this._held = { up: false, down: false, left: false, right: false };
 
-    // Character atlas (async, fail-soft). Null until loaded.
-    this._char = null;
-    loadCharacter(AVATAR_ATLAS_URL).then((c) => { this._char = c; }).catch(() => {});
-
+    // The avatar draws via the proc worker sprite (drawPerson) — no atlas to load.
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onKeyUp = this._onKeyUp.bind(this);
     window.addEventListener('keydown', this._onKeyDown);
@@ -208,6 +213,8 @@ class Avatar {
 
   get pos() { return { x: this.x, y: this.y }; }
   get nearestAgentIndex() { return this._nearestIndex; }
+  // Place the avatar (buffer coords) — the host seeds it at the view centre on enable.
+  setPos(x, y) { this.x = x; this.y = y; }
   get enabled() { return this._enabled; }
   set enabled(v) {
     this._enabled = !!v;
@@ -362,50 +369,46 @@ class Avatar {
     const prevSmooth = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
 
-    // ground shadow under the feet
+    const cx = Math.round(this.x);
+    const fy = Math.round(this.y);   // feet / floor point
+    // Walk stride: -1 = standing (both legs planted), 0/1 alternate a step.
+    const stride = this.moving ? (Math.floor(this.animClock / 90) % 2) : -1;
+
+    // ground shadow + a magenta USER ring so the player reads as "you" at a glance
     ctx.save();
     ctx.globalAlpha = 0.22;
     ctx.fillStyle = '#000';
     ctx.beginPath();
     ctx.ellipse(this.x, this.y, 9, 3, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = '#ff2e88';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(this.x, this.y, 8.5, 3, 0, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
 
-    const state = this.moving ? 'walk' : 'idle';
+    // Legs first (the torso overlaps their tops). drawPerson is a SEATED worker
+    // with no legs, so the avatar grows its own — two that alternate a step while
+    // walking, both planted when standing.
+    const pants = '#2b2f3a';
+    const lLift = stride === 0 ? 1 : 0;
+    const rLift = stride === 1 ? 1 : 0;
+    px(ctx, cx - 4, fy - 4 + lLift, 3, 4 - lLift, pants);
+    px(ctx, cx + 1, fy - 4 + rLift, 3, 4 - rLift, pants);
 
-    if (this._char) {
-      if (this.facing < 0) {
-        // Flip horizontally about the avatar's x so a right-facing atlas walks
-        // left. drawCharacterState anchors on (screenX, baselineY); after the
-        // mirror, screenX maps to the avatar's x again.
-        ctx.save();
-        ctx.translate(this.x, 0);
-        ctx.scale(-1, 1);
-        ctx.translate(-this.x, 0);
-        drawCharacterState(ctx, this.x, this.y, this._char, { state, clockMs: this.animClock });
-        ctx.restore();
-      } else {
-        drawCharacterState(ctx, this.x, this.y, this._char, { state, clockMs: this.animClock });
-      }
-    } else {
-      // Atlas not loaded yet — a tiny procedural stand-in so the avatar is visible.
-      this._drawFallbackBody(ctx);
-    }
+    // Front-facing proc body (matches the office workers). drawPerson's torso
+    // bottom lands ~29px below headTop, i.e. fy-4, right where the legs begin.
+    drawPerson(ctx, cx, fy - 33, {
+      seed: AVATAR_SEED,
+      activity: 'idle', // never "typing" — the avatar walks the floor, isn't at a desk
+      frame: Math.floor(this.animClock / 130),
+    });
 
     this._drawYouMarker(ctx);
 
     ctx.imageSmoothingEnabled = prevSmooth;
-  }
-
-  // A minimal fallback person (head + body) drawn with its feet at (x,y), used
-  // only until the walk atlas loads. Bright magenta so it's obviously the user.
-  _drawFallbackBody(ctx) {
-    const x = Math.round(this.x), y = Math.round(this.y);
-    ctx.fillStyle = '#2b2233'; ctx.fillRect(x - 4, y - 24, 8, 4);   // hair
-    ctx.fillStyle = '#f0c8a0'; ctx.fillRect(x - 4, y - 21, 8, 7);   // head
-    ctx.fillStyle = '#ff4fa3'; ctx.fillRect(x - 5, y - 14, 10, 11); // body (USER pink)
-    ctx.fillStyle = '#1a1a22'; ctx.fillRect(x - 4, y - 3, 3, 3);    // legs
-    ctx.fillRect(x + 1, y - 3, 3, 3);
   }
 
   // The "YOU" tag: a bobbing magenta down-arrow + label floating above the head,
