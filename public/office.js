@@ -7,7 +7,7 @@ import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
   drawWall, drawFloor, drawDaylight, moodForHour,
-  drawCubicle, drawCrown, drawNeedsYou, CELL_W, CELL_H,
+  drawCubicle, drawCrown, drawNeedsYou, drawWalker, CELL_W, CELL_H,
 } from './sprites.js';
 import { createAvatar } from './avatar.js';
 
@@ -34,6 +34,12 @@ let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built i
 // roaming pet: dir +1 faces right; sit→sleep when it rests a while; `petted` is
 // set while the walking avatar is right next to it (→ wakes + hearts in drawCat).
 const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1, sleeping: false, petted: false };
+// Idle-wander: settled-idle workers occasionally leave their desk, amble to a
+// lounge spot, linger, and head back. Per-agent state keyed by keyOf(agent); each
+// tick re-syncs the agent's home to its (possibly re-laid) desk. `wanderAnchors`
+// are lower-floor destinations built from the decor band in layout().
+const wanderers = new Map(); // key -> { phase, x, y, tx, ty, until, homeX, homeY }
+let wanderAnchors = [];      // [{x, y}] amble destinations on the open lower floor
 
 // DOM overlay layer: real (crisp) HTML text for the name chips + repo labels,
 // instead of canvas pixel text. One wrapper div over the canvas, scaled by
@@ -198,6 +204,14 @@ function plan() {
   // a cat and a dog lounging on the open floor of the band
   // (the cat is no longer static decor — it roams the floor; see updateCat/drawCat)
   decor.push({ type: 'dog', x: bufW - 60, y: bandY + LOUNGE_BAND_H - 4, seed: 9 });
+
+  // idle-wander destinations: open spots in the lounge band (couch / meeting /
+  // plants). Kept on the lower floor so wanderers read cleanly in front of the
+  // desks and don't amble straight through a workstation. (Empty floor → none,
+  // and updateWanderers just keeps everyone seated.)
+  wanderAnchors = decor
+    .filter((z) => z.type === 'lounge' || z.type === 'meeting' || z.type === 'plants')
+    .map((z) => ({ x: Math.round(z.x + z.w / 2), y: Math.round(z.y + z.h - 6) }));
 }
 
 // ---- decor drawing ---------------------------------------------------------
@@ -1034,6 +1048,66 @@ function updateCat(dt, now) {
   }
 }
 
+// Idle-wander: each settled-idle worker, on a relaxed timer, gets up and ambles to
+// a lounge spot, lingers, then returns to its desk. Runs every tick (ambient life).
+// At most a couple wander at once so the floor reads calm, not a parade.
+const WANDER_SPEED = 26; // buffer px / second amble
+function updateWanderers(dt, now) {
+  if (!cells.length) return;
+  const live = new Set();
+  let away = 0;
+  for (const [, w] of wanderers) if (w.phase !== 'seated') away++;
+  cells.forEach((cell) => {
+    const a = cell.agent;
+    const key = keyOf(a);
+    if (key == null) return;
+    live.add(key);
+    const homeX = cell.x + CELL_W / 2, homeY = cell.y + CELL_H - 6;
+    let w = wanderers.get(key);
+    if (!w) {
+      w = { phase: 'seated', x: homeX, y: homeY, tx: homeX, ty: homeY, until: now + 6000 + Math.random() * 20000, homeX, homeY };
+      wanderers.set(key, w);
+    } else { w.homeX = homeX; w.homeY = homeY; } // re-sync home to the (re-laid) desk
+    const settled = a.activity === 'idle' && !a.needsYou && !a.awaitingReply
+      && !(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
+    // started working / went needs-you while out → head home now
+    if (!settled && w.phase !== 'seated' && w.phase !== 'returning') {
+      w.phase = 'returning'; w.tx = w.homeX; w.ty = w.homeY;
+    }
+    switch (w.phase) {
+      case 'seated':
+        if (now >= w.until) {
+          if (settled && away < 2 && wanderAnchors.length) {
+            const d = wanderAnchors[Math.floor(Math.random() * wanderAnchors.length)];
+            w.x = w.homeX; w.y = w.homeY; w.tx = d.x; w.ty = d.y; w.phase = 'walking'; away++;
+          } else {
+            w.until = now + 8000 + Math.random() * 16000; // not now — check again later
+          }
+        }
+        break;
+      case 'walking':
+        if (stepToward(w, dt)) { w.phase = 'lingering'; w.until = now + 5000 + Math.random() * 7000; }
+        break;
+      case 'lingering':
+        if (now >= w.until) { w.phase = 'returning'; w.tx = w.homeX; w.ty = w.homeY; }
+        break;
+      case 'returning':
+        if (stepToward(w, dt)) { w.phase = 'seated'; w.until = now + 12000 + Math.random() * 22000; }
+        break;
+    }
+  });
+  for (const k of wanderers.keys()) if (!live.has(k)) wanderers.delete(k); // agent left the floor
+}
+
+// Amble w toward (tx,ty) at WANDER_SPEED; returns true on arrival.
+function stepToward(w, dt) {
+  const dx = w.tx - w.x, dy = w.ty - w.y, d = Math.hypot(dx, dy);
+  if (d <= 1.2) return true;
+  const step = Math.min(WANDER_SPEED * dt / 1000, d);
+  w.x += (dx / d) * step; w.y += (dy / d) * step;
+  return false;
+}
+
 // ---- scene -----------------------------------------------------------------
 function draw() {
   ctx.clearRect(0, 0, bufW, bufH);
@@ -1044,26 +1118,41 @@ function draw() {
   drawCeilingLights(mood.glow);
   drawDecor();
   drawClusterRugs();
-  // cubicles (cells already in row-major order, so later rows overlap earlier).
-  // The avatar is INTERLEAVED by its feet-y: drawn just before the first desk that
-  // sits in front of it (lower on screen), so it passes BEHIND desks ahead of it
-  // and IN FRONT of desks behind it instead of always floating on top (z-order).
-  // Names + repo labels are DOM (see syncLabels), positioned on each setAgents().
-  const walking = avatar && avatar.enabled;
-  const avFeetY = walking ? avatar.pos.y : Infinity;
-  let avDrawn = !walking;
-  for (const cell of cells) {
-    if (!avDrawn && avFeetY < cell.y + CELL_H) { avatar.draw(ctx); avDrawn = true; }
+  // --- depth-sorted floor actors: every desk (the seated worker is HIDDEN while
+  // its agent is away wandering), each wandering worker, the avatar, and the cat —
+  // painted in baseline-y order so they pass correctly in front of / behind each
+  // other. Names are DOM chips that FOLLOW a wandering worker (else sit at the desk).
+  const actors = [];
+  cells.forEach((cell, i) => {
     const a = cell.agent;
     const k = keyOf(a);
     const selected = k != null && k === selectedKey;
     const hovered = k != null && k === hoverKey && !selected;
     // just-finished + unviewed → the worker waves to catch your eye (app.js owns the set)
     const unread = !!(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
-    drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread);
-    if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
-  }
-  if (!avDrawn) avatar.draw(ctx); // avatar is in front of every desk (or floor is empty)
+    const w = wanderers.get(k);
+    const away = !!(w && w.phase !== 'seated');
+    actors.push({ y: cell.y + CELL_H, fn: () => {
+      drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread, away);
+      if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
+    } });
+    if (away) {
+      const seed = (a.pid | 0) || hashInt(a.sessionId || 'a'); // SAME look as the seated worker
+      const moving = w.phase === 'walking' || w.phase === 'returning';
+      actors.push({ y: w.y, fn: () => drawWalker(ctx, Math.round(w.x), Math.round(w.y), { seed, frame, walking: moving }) });
+    }
+    // the name chip follows a wandering worker; otherwise it sits under the desk
+    const node = nameNodes[i];
+    if (node && node.style.display !== 'none') {
+      if (away) { node.style.left = Math.round(w.x) + 'px'; node.style.top = Math.round(w.y - 40) + 'px'; }
+      else { node.style.left = (cell.x + CELL_W / 2) + 'px'; node.style.top = (cell.y + CELL_H - 10) + 'px'; }
+    }
+  });
+  if (avatar && avatar.enabled) actors.push({ y: avatar.pos.y, fn: () => avatar.draw(ctx) });
+  if (cat.init) actors.push({ y: cat.y, fn: () => drawCat(cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted }) });
+  actors.sort((p, q) => p.y - q.y);
+  for (const act of actors) act.fn();
+
   // "Waiting on you" — highest-signal state, painted LAST so it floats above every
   // desk. agent.needsYou is the live "blocked on you" field; awaitingReply is an
   // older alias for the same thing, kept as a harmless fallback. Falsy → not waiting.
@@ -1071,9 +1160,6 @@ function draw() {
     const a = cell.agent;
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
-  // The roaming pet floats above the desks (it lives on the open lower floor); the
-  // avatar was already drawn interleaved by depth in the cubicle loop above.
-  if (cat.init) drawCat(cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted });
 }
 
 // ---- public API ------------------------------------------------------------
@@ -1165,6 +1251,7 @@ function loop() {
   const dt = lastT ? Math.min(now - lastT, 100) : 16; // clamp big tab-out gaps
   lastT = now;
   updateCat(dt, now);                // ambient — roams whether or not walk mode is on
+  updateWanderers(dt, now);          // ambient — idle workers stroll the lower floor
   const walking = !!(avatar && avatar.enabled);
   if (walking) {
     avatar.update(dt, { podPositions: buildPods(), bounds: floorBounds() });
@@ -1189,6 +1276,7 @@ export function reset(n, seed) {
   clearTimeout(timer);               // kill the tick the RAF may have already scheduled
   started = false;                   // makes a pending RAF callback bail instead of rescheduling
   userMoved = false;                 // re-fit the fresh layout
+  wanderers.clear();                 // fresh floor → nobody mid-stroll
   setAgents(makeAgents(n, seed));
 }
 

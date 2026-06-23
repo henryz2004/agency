@@ -419,7 +419,7 @@ export const CELL_H = 78;
 const DESK_TOP = 52;   // desk surface y within the cell
 const DIV_W = 4;       // legacy inset used to position desk props/flag
 
-export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread = false) {
+export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread = false, away = false) {
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
@@ -434,7 +434,9 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread =
   // translucency, which looked like a render glitch. Active desks stay full color
   // so they pop on a glance-scan.
   if (idle) ctx.filter = 'grayscale(1) brightness(0.82)';
-  drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame, unread });
+  // `away` (idle-wander): the worker has left its desk — draw the empty workstation
+  // (the standing/walking sprite is drawn at its floor position by office.js).
+  if (!away) drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame, unread });
   // a pinned flag + sticky-note cluster (personalization) — muted too when idle
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
   drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
