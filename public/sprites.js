@@ -335,11 +335,12 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   const typing = activity === 'working';
   const shellRunning = activity === 'shell';
   const fp = frame + (seed % 6);
-  // Settled-idle workers stand perfectly still (no bob). A shell-running agent —
-  // and a FRESHLY-idle UNREAD one (it also waves) — gets the subtle breath bob;
-  // a working agent's life comes from its typing hands instead.
-  const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
-  const hy = headTopY - breath;
+  // Vertical body bob: a WORKING agent bobs on the (fast) typing cadence so it
+  // visibly reads as busy; a shell-running / freshly-idle-unread one "breathes"
+  // slowly; a settled-idle worker stands perfectly still.
+  const bob = typing ? (frame % 4 < 2 ? 1 : 0)
+            : (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
+  const hy = headTopY - bob;
   const blink = (frame + (seed % 11)) % 13 === 0;
   const fy = hy + 4;
 
@@ -349,7 +350,7 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   // --- torso (shirt) --- slimmed so the worker reads as a compact little person
   // rather than a wide block: shoulders taper from the neck, body ~13 wide (was
   // 15) and a touch shorter. (The desk hides the lower half on a seated worker.)
-  const ty = fy + 12 - breath;
+  const ty = fy + 12 - bob;
   px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders (tapered in)
   px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
   px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26)); // right-side shade
@@ -366,12 +367,14 @@ export function drawPerson(ctx, cx, headTopY, opts) {
     px(ctx, cx + 7, ty - 5, 2, 6, shade(shirt, -12)); // right forearm up
     px(ctx, cx + 6 + wig, ty - 9, 3, 3, skin);        // waving hand
   } else {
-    const lh = typing && frame % 2 ? 1 : 0;
-    const rh = typing && frame % 2 ? 0 : 1;
-    px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12));
-    px(ctx, cx + 6, ty + 3, 2, 7, shade(shirt, -12));
-    px(ctx, cx - 8, ty + 10 + (typing ? lh : 0), 2, 2, skin); // hands
-    px(ctx, cx + 6, ty + 10 + (typing ? rh : 0), 2, 2, skin);
+    // typing: forearms + hands STRIKE up off the keyboard, alternating L/R (with
+    // the body bob above) so it clearly reads as working; at rest the arms hang.
+    const lh = typing && frame % 2 ? 2 : 0;
+    const rh = typing && frame % 2 ? 0 : 2;
+    px(ctx, cx - 8, ty + 3, 2, 7 - lh, shade(shirt, -12)); // left arm (raises with its hand)
+    px(ctx, cx + 6, ty + 3, 2, 7 - rh, shade(shirt, -12)); // right arm
+    px(ctx, cx - 8, ty + 10 - lh, 2, 2, skin);             // left hand (lifts UP, stays above the desk)
+    px(ctx, cx + 6, ty + 10 - rh, 2, 2, skin);             // right hand
   }
 }
 
@@ -428,7 +431,7 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread =
   // --- the seated worker + their personal props. Idle no longer desaturates: the
   // OFF (dark) monitor + grey status dot already read as idle, so the worker keeps
   // full color. `away` (idle-wander): worker has left its desk → draw it empty.
-  if (!away) drawPerson(ctx, cx - 6, y + DESK_TOP - 28, { seed, activity: agent.activity, frame, unread });
+  if (!away) drawPerson(ctx, cx - 6, y + DESK_TOP - 27, { seed, activity: agent.activity, frame, unread });
   // a pinned flag + sticky-note cluster (personalization)
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
   drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
