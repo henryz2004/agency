@@ -373,6 +373,8 @@ class Avatar {
     const fy = Math.round(this.y);   // feet / floor point
     // Walk stride: -1 = standing (both legs planted), 0/1 alternate a step.
     const stride = this.moving ? (Math.floor(this.animClock / 90) % 2) : -1;
+    // a 1px walk bounce: the body bobs up on alternating steps while the feet plant.
+    const bob = stride === 0 ? 1 : 0;
 
     // ground shadow + a magenta USER ring so the player reads as "you" at a glance
     ctx.save();
@@ -400,7 +402,7 @@ class Avatar {
 
     // Front-facing proc body (matches the office workers). drawPerson's torso
     // bottom lands ~29px below headTop, i.e. fy-4, right where the legs begin.
-    drawPerson(ctx, cx, fy - 33, {
+    drawPerson(ctx, cx, fy - 33 - bob, {
       seed: AVATAR_SEED,
       activity: 'idle', // never "typing" — the avatar walks the floor, isn't at a desk
       frame: Math.floor(this.animClock / 130),
@@ -420,29 +422,35 @@ class Avatar {
     const ax = Math.round(this.x);
     const ay = Math.round(headTop - 8 - bob);
 
-    // label pill
-    const label = 'YOU';
-    ctx.font = '6px monospace';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'center';
-    const padX = 3, tw = Math.ceil(ctx.measureText(label).width);
-    const w = tw + padX * 2, h = 9;
+    // "YOU" as 3x5 pixel glyphs (fillRect), NOT canvas text — the world canvas is
+    // CSS-upscaled several×, and anti-aliased fillText blurs when magnified; these
+    // integer rects stay crisp like the rest of the procedural art.
+    const GLYPHS = { Y: ['101', '101', '010', '010', '010'], O: ['111', '101', '101', '101', '111'], U: ['101', '101', '101', '101', '111'] };
+    const letters = 'YOU', lw = 3, lh = 5, gap = 1;
+    const textW = letters.length * lw + (letters.length - 1) * gap; // 11
+    const padX = 3, padY = 2;
+    const w = textW + padX * 2, h = lh + padY * 2; // 17 x 9
     const lx = ax - Math.round(w / 2), ly = ay - h - 2;
     ctx.fillStyle = '#ff2e88';                 // hot magenta pill
     ctx.fillRect(lx, ly, w, h);
     ctx.fillStyle = 'rgba(255,255,255,0.30)';  // top sheen
     ctx.fillRect(lx, ly, w, 1);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, ax, ly + 2);
+    let gx = lx + padX;
+    for (const ch of letters) {
+      const g = GLYPHS[ch];
+      for (let r = 0; r < lh; r++) for (let c = 0; c < lw; c++) {
+        if (g[r][c] === '1') ctx.fillRect(gx + c, ly + padY + r, 1, 1);
+      }
+      gx += lw + gap;
+    }
 
-    // down-arrow pointing at the head
+    // down-arrow pointing at the head — pixel rows (crisp), not an AA triangle
     ctx.fillStyle = '#ff2e88';
-    ctx.beginPath();
-    ctx.moveTo(ax - 3, ay - 1);
-    ctx.lineTo(ax + 3, ay - 1);
-    ctx.lineTo(ax, ay + 3);
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillRect(ax - 3, ay - 1, 7, 1);
+    ctx.fillRect(ax - 2, ay, 5, 1);
+    ctx.fillRect(ax - 1, ay + 1, 3, 1);
+    ctx.fillRect(ax, ay + 2, 1, 1);
   }
 }
 

@@ -379,8 +379,10 @@ html, body {
 }
 .pm-rate { font-family: var(--term); font-size: var(--t-sub); letter-spacing: 0; text-transform: none; color: var(--green); }
 .pm-value {
-  margin-top: 6px; font-family: var(--term); font-size: var(--t-hero); line-height: 0.95;
-  color: var(--gold); letter-spacing: 1px;
+  /* 30px (not the 44px hero) so a 7–8 figure payroll fits the panel without
+     clipping at the card edge; still the boldest number in the card. */
+  margin-top: 6px; font-family: var(--term); font-size: 30px; line-height: 0.95;
+  color: var(--gold); letter-spacing: 0.5px; white-space: nowrap;
   text-shadow: 0 0 14px rgba(255,209,102,0.5), 1px 1px 0 #5a4410;
   font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
 }

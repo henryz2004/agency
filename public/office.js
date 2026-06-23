@@ -225,19 +225,32 @@ function drawAreaRug(z, fill, edge) {
 
 function drawLounge(z) {
   const { floorY, rx } = drawAreaRug(z, '#caa46c', '#b58f56'); // warm sand rug
-  // two-seat couch on the left
+  // two-seat couch on the left, FRONT-FACING (tall backrest at the back, seat
+  // cushions toward the viewer, arms framing the sides) so it reads as a sofa you
+  // sit into — not an ambiguous top-down slab.
   const couchCols = ['#d9694f', '#5d9ce0', '#5dc98a', '#a87de0'];
   const couch = couchCols[hashInt('couch' + z.seed) % couchCols.length];
+  const lite = shade(couch, 20), dark = shade(couch, -22), arm = shade(couch, -8);
   const cxx = rx + 4, cyy = floorY - 16;
-  px(ctx, cxx, cyy, 34, 12, couch);              // body
-  px(ctx, cxx, cyy - 5, 34, 6, shade(couch, -12)); // backrest
-  px(ctx, cxx, cyy - 5, 34, 1, shade(couch, 22));
-  px(ctx, cxx - 3, cyy - 4, 4, 16, shade(couch, -8)); // left arm
-  px(ctx, cxx + 33, cyy - 4, 4, 16, shade(couch, -8)); // right arm
-  px(ctx, cxx + 8, cyy + 1, 1, 10, shade(couch, -20)); // cushion seam
-  px(ctx, cxx + 22, cyy + 1, 1, 10, shade(couch, -20));
-  // a throw pillow
-  px(ctx, cxx + 3, cyy + 2, 7, 6, '#f4d35e');
+  // backrest (tall block at the back)
+  px(ctx, cxx + 3, cyy - 8, 30, 9, couch);
+  px(ctx, cxx + 3, cyy - 8, 30, 1, lite);           // top highlight
+  px(ctx, cxx + 17, cyy - 7, 1, 7, dark);           // back split between the seats
+  // seat cushions in front of the backrest
+  px(ctx, cxx, cyy + 1, 36, 7, couch);
+  px(ctx, cxx, cyy + 1, 36, 1, lite);               // cushion top edge
+  px(ctx, cxx + 17, cyy + 1, 1, 7, dark);           // seam between the two seats
+  // front base / skirt + little feet
+  px(ctx, cxx + 2, cyy + 8, 32, 2, dark);
+  px(ctx, cxx + 3, cyy + 10, 2, 2, '#2c2018');
+  px(ctx, cxx + 31, cyy + 10, 2, 2, '#2c2018');
+  // arms framing the seat (a touch taller than the cushions)
+  px(ctx, cxx - 2, cyy - 5, 5, 14, arm);
+  px(ctx, cxx + 33, cyy - 5, 5, 14, arm);
+  px(ctx, cxx - 2, cyy - 5, 5, 1, lite);
+  px(ctx, cxx + 33, cyy - 5, 5, 1, lite);
+  // a throw pillow on the left cushion
+  px(ctx, cxx + 4, cyy + 2, 7, 5, '#f4d35e');
   // coffee table in front
   const tx = cxx + 40, ty = floorY - 8;
   px(ctx, tx, ty, 18, 5, '#8a5e34');
@@ -630,7 +643,9 @@ const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export function setReservedRight(px) {
   reservedRight = Math.max(0, px || 0);
   if (!canvas) return; // office not initialized yet
-  if (!userMoved) fitView();
+  // Don't re-fit during a walk (it would reset cam.s and drop the immersive zoom);
+  // just re-confine to the new available width. Mirrors the guard in the loop.
+  if (!userMoved && !(avatar && avatar.enabled)) fitView();
   else { clampPan(); applyCam(); }
 }
 
@@ -667,33 +682,33 @@ function applyCam() {
   if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
 }
 
+// The camera always CONFINES the office to the visible floor (the area left of the
+// hovering panel) so we never see void around it — in walk mode AND free pan/zoom.
+// Centres the office on an axis where it's smaller than the frame.
 function clampPan() {
   const vp = viewportRect();
+  const availW = Math.max(40, vp.width - reservedRight);
   const w = bufW * UPSCALE * cam.s, h = bufH * UPSCALE * cam.s;
-  if (avatar && avatar.enabled) {
-    // Walk mode: CONFINE the camera so the view never shows past the office —
-    // the floor always fills the frame (centred on an axis where it's smaller
-    // than the frame). cam.x ∈ [vp.width - w, 0] keeps both edges flush.
-    cam.x = w >= vp.width ? clampN(cam.x, vp.width - w, 0) : (vp.width - w) / 2;
-    cam.y = h >= vp.height ? clampN(cam.y, vp.height - h, 0) : (vp.height - h) / 2;
-    return;
-  }
-  const KEEP = 80; // free pan/zoom: always keep at least this much office on-screen
-  cam.x = clampN(cam.x, KEEP - w, vp.width - KEEP);
-  cam.y = clampN(cam.y, KEEP - h, vp.height - KEEP);
+  cam.x = w >= availW ? clampN(cam.x, availW - w, 0) : Math.round((availW - w) / 2);
+  cam.y = h >= vp.height ? clampN(cam.y, vp.height - h, 0) : Math.round((vp.height - h) / 2);
 }
 
-// Fit the whole office into the floor-frame, centered in the free area LEFT of
-// the hovering stats panel (reservedRight). Capped at the native 3x so a small
-// floor isn't over-magnified.
-function fitView() {
+// The COVER fit — the zoom at which the office FILLS the visible floor (the area
+// left of the panel) on BOTH axes, cropping the longer one. We bound zoom-out to
+// this (the LARGER of the two ratios → limited by the office's smaller dimension)
+// so the office always fills the frame and we never see void / letterbox bars.
+// Capped at native 3x so a tiny floor isn't blown up absurdly.
+function coverScale() {
   const vp = viewportRect();
   const availW = Math.max(40, vp.width - reservedRight);
-  const fitS = Math.min(availW / (bufW * UPSCALE), vp.height / (bufH * UPSCALE));
-  cam.s = clampN(fitS, 0.25, 1);
-  const eff = UPSCALE * cam.s;
-  cam.x = Math.max(0, Math.round((availW - bufW * eff) / 2));
-  cam.y = Math.max(0, Math.round((vp.height - bufH * eff) / 2));
+  return clampN(Math.max(availW / (bufW * UPSCALE), vp.height / (bufH * UPSCALE)), 0.05, 3);
+}
+
+// Default view = the cover fit: the most zoomed-out you can be without void. From
+// here you can only zoom IN; clampPan keeps the office covering the frame.
+function fitView() {
+  cam.s = coverScale();
+  clampPan();
   applyCam();
 }
 
@@ -702,7 +717,8 @@ function zoomAt(clientX, clientY, factor) {
   const pxp = clientX - vp.left, pyp = clientY - vp.top;
   const eff0 = UPSCALE * cam.s;
   const bx = (pxp - cam.x) / eff0, by = (pyp - cam.y) / eff0;
-  cam.s = clampN(cam.s * factor, 0.25, 3);
+  // can't zoom out past the cover fit (office always fills the frame, no void)
+  cam.s = clampN(cam.s * factor, coverScale(), 3);
   const eff1 = UPSCALE * cam.s;
   cam.x = pxp - bx * eff1;
   cam.y = pyp - by * eff1;
@@ -888,19 +904,38 @@ function followAvatar(dt = 16) {
   applyCam();
 }
 
-// Toggle walk mode (the 'g' key / the button). On enable, drop the avatar at the
-// current view centre (so it appears where you're looking) clamped to the floor.
+// Toggle walk mode (the 'g' key / the button). On ENTER: drop the avatar where
+// the user is looking, then zoom IN for an immersive first-person feel and snap
+// the camera onto it. On EXIT: restore the pre-walk camera.
+const WALK_ZOOM = 1.8;  // cam.s in walk mode → eff ≈ 5.4x: a close, immersive view
+let preWalkCam = null;  // camera saved on walk-enter, restored on walk-exit
 function toggleWalk(on) {
   if (!avatar) return;
+  const was = avatar.enabled;
   avatar.enabled = on == null ? !avatar.enabled : !!on;
-  if (avatar.enabled) {
+  if (avatar.enabled && !was) {
     const vp = viewportRect();
-    const eff = UPSCALE * cam.s;
+    const effOld = UPSCALE * cam.s;
     const b = floorBounds();
+    // drop the avatar at the current view centre, in world coords at the OLD zoom
     avatar.setPos(
-      clampN((vp.width / 2 - cam.x) / eff, b.minX, b.maxX),
-      clampN((vp.height / 2 - cam.y) / eff, b.minY, b.maxY)
+      clampN((vp.width / 2 - cam.x) / effOld, b.minX, b.maxX),
+      clampN((vp.height / 2 - cam.y) / effOld, b.minY, b.maxY)
     );
+    preWalkCam = { s: cam.s, x: cam.x, y: cam.y, userMoved };
+    cam.s = Math.max(WALK_ZOOM, coverScale()); // zoom in for immersion, but never below cover (no void)
+    // snap (no lerp) so the camera doesn't lurch from the old framing
+    const effNew = UPSCALE * cam.s;
+    const availW = Math.max(40, vp.width - reservedRight);
+    cam.x = availW / 2 - avatar.pos.x * effNew;
+    cam.y = vp.height / 2 - avatar.pos.y * effNew;
+    clampPan();
+    applyCam();
+  } else if (!avatar.enabled && was && preWalkCam) {
+    // restore the pre-walk zoom + pan + auto-fit state
+    cam.s = preWalkCam.s; cam.x = preWalkCam.x; cam.y = preWalkCam.y;
+    userMoved = preWalkCam.userMoved; preWalkCam = null;
+    clampPan(); applyCam();
   }
   updateWalkUI();
 }
@@ -1010,8 +1045,15 @@ function draw() {
   drawDecor();
   drawClusterRugs();
   // cubicles (cells already in row-major order, so later rows overlap earlier).
+  // The avatar is INTERLEAVED by its feet-y: drawn just before the first desk that
+  // sits in front of it (lower on screen), so it passes BEHIND desks ahead of it
+  // and IN FRONT of desks behind it instead of always floating on top (z-order).
   // Names + repo labels are DOM (see syncLabels), positioned on each setAgents().
+  const walking = avatar && avatar.enabled;
+  const avFeetY = walking ? avatar.pos.y : Infinity;
+  let avDrawn = !walking;
   for (const cell of cells) {
+    if (!avDrawn && avFeetY < cell.y + CELL_H) { avatar.draw(ctx); avDrawn = true; }
     const a = cell.agent;
     const k = keyOf(a);
     const selected = k != null && k === selectedKey;
@@ -1021,6 +1063,7 @@ function draw() {
     drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread);
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
   }
+  if (!avDrawn) avatar.draw(ctx); // avatar is in front of every desk (or floor is empty)
   // "Waiting on you" — highest-signal state, painted LAST so it floats above every
   // desk. agent.needsYou is the live "blocked on you" field; awaitingReply is an
   // older alias for the same thing, kept as a harmless fallback. Falsy → not waiting.
@@ -1028,9 +1071,9 @@ function draw() {
     const a = cell.agent;
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
-  // Floor entities last, so the roaming pet + the player float above the desks.
+  // The roaming pet floats above the desks (it lives on the open lower floor); the
+  // avatar was already drawn interleaved by depth in the cubicle loop above.
   if (cat.init) drawCat(cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted });
-  if (avatar && avatar.enabled) avatar.draw(ctx);
 }
 
 // ---- public API ------------------------------------------------------------

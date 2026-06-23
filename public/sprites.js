@@ -278,47 +278,36 @@ export function drawDaylight(ctx, bufW, top, bufH, mood = MOODS.day) {
 // A little front-facing person: hair/skin/shirt vary per seed; hands type when
 // working. Drawn so the head clears the cubicle divider and the body sits behind
 // the desk. (cx, seatY) = centre-x, the chair seat line.
-export function drawPerson(ctx, cx, headTopY, opts) {
-  const { seed = 1, activity = 'idle', frame = 0, unread = false } = opts;
+
+// Deterministic per-seed appearance (skin / hair / shirt / style / glasses /
+// beard). Extracted so the seated worker and the standing walker derive the SAME
+// look from a seed — keep the draw ORDER below so existing seeds are unchanged.
+function personLook(seed) {
   const vr = rng(seed * 2654435761 + 7);
-  const skin = SKINS[Math.floor(vr() * SKINS.length)];
-  const hair = HAIRS[Math.floor(vr() * HAIRS.length)];
-  const shirt = SHIRTS[Math.floor(vr() * SHIRTS.length)];
-  const hairStyle = Math.floor(vr() * 4);
-  const glasses = vr() < 0.3;
-  const beard = vr() < 0.22;
+  return {
+    skin: SKINS[Math.floor(vr() * SKINS.length)],
+    hair: HAIRS[Math.floor(vr() * HAIRS.length)],
+    shirt: SHIRTS[Math.floor(vr() * SHIRTS.length)],
+    hairStyle: Math.floor(vr() * 4),
+    glasses: vr() < 0.3,
+    beard: vr() < 0.22,
+  };
+}
 
-  const typing = activity === 'working';
-  const shellRunning = activity === 'shell';
-  const fp = frame + (seed % 6);
-  // Settled-idle workers stand perfectly still (no bob). A shell-running agent —
-  // and a FRESHLY-idle UNREAD one (it also waves) — gets the subtle breath bob;
-  // a working agent's life comes from its typing hands instead.
-  const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
-  const hy = headTopY - breath;
-  const blink = (frame + (seed % 11)) % 13 === 0;
-
-  // --- hair / head --- always draw FULL hair (incl. for headphone wearers) so
-  // nobody renders as a bare head with a stray dark bar laid across it.
+// Hair + head + face + neck for one worker, from a personLook(). Shared by
+// drawPerson (seated) and drawWalker (standing) so a worker looks identical either way.
+function drawHeadFace(ctx, cx, hy, look, blink) {
+  const { skin, hair, hairStyle, glasses, beard } = look;
   const hx = cx - 6;
-  if (hairStyle === 1) { // tall quiff
-    px(ctx, hx, hy - 2, 12, 8, hair);
-    px(ctx, hx + 3, hy - 4, 6, 3, hair);
-  } else if (hairStyle === 2) { // side part
-    px(ctx, hx, hy, 12, 6, hair);
-    px(ctx, hx + 4, hy, 2, 3, shade(hair, 22));
-  } else if (hairStyle === 3) { // cropped
-    px(ctx, hx + 1, hy + 1, 10, 4, hair);
-  } else { // classic
-    px(ctx, hx, hy, 12, 6, hair);
-  }
-  px(ctx, hx - 1, hy + 4, 2, 7, hair); // sides
+  if (hairStyle === 1) { px(ctx, hx, hy - 2, 12, 8, hair); px(ctx, hx + 3, hy - 4, 6, 3, hair); } // tall quiff
+  else if (hairStyle === 2) { px(ctx, hx, hy, 12, 6, hair); px(ctx, hx + 4, hy, 2, 3, shade(hair, 22)); } // side part
+  else if (hairStyle === 3) { px(ctx, hx + 1, hy + 1, 10, 4, hair); } // cropped
+  else { px(ctx, hx, hy, 12, 6, hair); } // classic
+  px(ctx, hx - 1, hy + 4, 2, 7, hair);   // sides
   px(ctx, hx + 11, hy + 4, 2, 7, hair);
-  // face
   const fy = hy + 4;
   px(ctx, cx - 5, fy, 11, 10, skin);
   px(ctx, cx - 5, fy, 11, 2, shade(skin, 16)); // forehead light
-  // eyes
   if (blink) {
     px(ctx, cx - 3, fy + 5, 2, 1, shade(skin, -40));
     px(ctx, cx + 2, fy + 5, 2, 1, shade(skin, -40));
@@ -335,9 +324,27 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   }
   if (beard) px(ctx, cx - 5, fy + 7, 11, 3, shade(skin, -48));
   px(ctx, cx - 1, fy + 8, 3, 1, shade(skin, -30)); // mouth
-  // (no hats/headphones — workers wear hair only, per the no-hats decision)
-  // neck
-  px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14));
+  px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14)); // neck
+}
+
+export function drawPerson(ctx, cx, headTopY, opts) {
+  const { seed = 1, activity = 'idle', frame = 0, unread = false } = opts;
+  const look = personLook(seed);
+  const { skin, shirt } = look;
+
+  const typing = activity === 'working';
+  const shellRunning = activity === 'shell';
+  const fp = frame + (seed % 6);
+  // Settled-idle workers stand perfectly still (no bob). A shell-running agent —
+  // and a FRESHLY-idle UNREAD one (it also waves) — gets the subtle breath bob;
+  // a working agent's life comes from its typing hands instead.
+  const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
+  const hy = headTopY - breath;
+  const blink = (frame + (seed % 11)) % 13 === 0;
+  const fy = hy + 4;
+
+  // hair + head + face + neck (shared with the standing drawWalker)
+  drawHeadFace(ctx, cx, hy, look, blink);
 
   // --- torso (shirt) ---
   const ty = fy + 12 - breath;
@@ -364,6 +371,40 @@ export function drawPerson(ctx, cx, headTopY, opts) {
     px(ctx, cx - 9, ty + 11 + (typing ? lh : 0), 3, 2, skin); // hands
     px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
   }
+}
+
+// A STANDING / walking worker — the same person as drawPerson, on its feet, for
+// the idle-wander floor life. (cx, feetY) = centre-x and the floor line at the
+// feet. Front-facing (no flip); `walking` strides the legs and bobs the body.
+export function drawWalker(ctx, cx, feetY, opts = {}) {
+  const { seed = 1, frame = 0, walking = false } = opts;
+  const look = personLook(seed);
+  const { skin, shirt } = look;
+  const blink = (frame + (seed % 11)) % 13 === 0;
+  // soft pixel ground shadow for grounding
+  px(ctx, cx - 6, feetY, 12, 1, 'rgba(0,0,0,0.20)');
+  px(ctx, cx - 4, feetY + 1, 8, 1, 'rgba(0,0,0,0.12)');
+  const bob = walking && frame % 4 < 2 ? 1 : 0; // gentle walk bob (upper body)
+  const ty = feetY - 19 - bob;          // torso top
+  const hy = ty - 16;                   // head top (neck lands back at ty)
+  drawHeadFace(ctx, cx, hy, look, blink);
+  // torso (shirt) — same shapes as the seated worker
+  px(ctx, cx - 6, ty, 13, 3, shirt);
+  px(ctx, cx - 7, ty + 3, 15, 9, shirt);
+  px(ctx, cx + 4, ty, 4, 12, shade(shirt, -26));
+  px(ctx, cx - 1, ty, 2, 12, shade(shirt, 18));
+  // arms hanging at the sides
+  px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
+  px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
+  px(ctx, cx - 9, ty + 11, 3, 2, skin);
+  px(ctx, cx + 7, ty + 11, 3, 2, skin);
+  // legs (pants, darker than the shirt) + an alternating walk stride
+  const pants = shade(shirt, -55);
+  const legTop = ty + 12, legH = feetY - legTop;
+  const lLift = walking && frame % 4 < 2 ? 1 : 0;
+  const rLift = walking && frame % 4 < 2 ? 0 : 1;
+  px(ctx, cx - 4, legTop + lLift, 3, legH - lLift, pants);
+  px(ctx, cx + 1, legTop + rLift, 3, legH - rLift, pants);
 }
 
 // ---- a desk workstation ----------------------------------------------------
@@ -422,12 +463,14 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread =
     ctx.fillRect(x + CELL_W - 30, y + DESK_TOP - 22, 28, 24);
   }
 
-  // --- subagents: tiny helpers on the floor in front of the desk ---
+  // --- subagents: tiny helpers gathered in front of the desk. Kept ABOVE the
+  // name chip (its top sits at CELL_H-10) so the row never peeks out behind the
+  // nameplate as a clipped teal band. ---
   const subs = agent.subagents || [];
   if (subs.length) {
     const n = Math.min(subs.length, 4), sp = 9;
     const sx = Math.round(x + (CELL_W - n * sp) / 2);
-    for (let i = 0; i < n; i++) drawMinion(ctx, sx + i * sp, y + CELL_H - 4, (frame + i) % 2);
+    for (let i = 0; i < n; i++) drawMinion(ctx, sx + i * sp, y + CELL_H - 13, (frame + i) % 2);
   }
 
   // --- selection / hover ring --- (selected = persistent tier-colored pulse;
