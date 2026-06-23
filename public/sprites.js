@@ -365,7 +365,10 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
-  const idle = agent.activity === 'idle';
+  // A "waiting on you" agent is usually idle, but it must POP (not recede), so it
+  // is exempt from the idle desaturation — the amber desk treatment marks it.
+  const needsYou = !!(agent.needsYou || agent.awaitingReply);
+  const idle = agent.activity === 'idle' && !needsYou;
 
   // --- the seated worker + their personal props --- idle reads as a powered-down
   // workstation: DESATURATE (grayscale + slight dim) rather than the old
@@ -533,28 +536,43 @@ function drawRing(ctx, x, y, w, h, color, frame, strong) {
   ctx.globalAlpha = 1;
 }
 
-// "Waiting on you" — an amber speech bubble with a "!" bobbing up-right of the
-// head, with a soft pulsing halo. The floor's highest-signal state (a background
-// agent blocked on the user). (cx, headTopY) = head centre-x, head-top y.
-export function drawNeedsYou(ctx, cx, headTopY, frame) {
-  const bob = frame % 6 < 3 ? 0 : 1;
-  const bx = cx + 8; // offset right of the head
-  const y = headTopY - 6 - bob;
-  // soft pulsing halo behind the bubble
-  ctx.globalAlpha = frame % 8 < 4 ? 0.34 : 0.16;
-  px(ctx, bx - 2, y - 1, 16, 13, '#ffb454');
+// "Waiting on you" — the floor's HIGHEST-signal state (a background agent blocked
+// on the user). Treats the WHOLE DESK as the alert, not just a small floating !:
+// a soft pulsing amber glow pooled over the cell + a bold pulsing amber frame
+// around it + a bobbing "!" bubble over the head. Reads come-help-me, and is
+// deliberately unlike the green working LED, the gray idle desk, and the pink
+// just-finished pip. (x, y) = the cell's TOP-LEFT (CELL_W × CELL_H).
+export function drawNeedsYou(ctx, x, y, frame) {
+  const ph = (frame % 16) / 16;
+  const pulse = 0.5 - 0.5 * Math.cos(ph * 2 * Math.PI); // smooth 0→1→0 breathing
+  const amber = '#ffb454';
+  // soft amber glow pooling over the desk
+  const gx = x + CELL_W / 2, gy = y + CELL_H / 2;
+  const grad = ctx.createRadialGradient(gx, gy, 4, gx, gy, CELL_W * 0.72);
+  grad.addColorStop(0, `rgba(255,180,84,${(0.12 + pulse * 0.16).toFixed(3)})`);
+  grad.addColorStop(1, 'rgba(255,180,84,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - 3, y, CELL_W + 6, CELL_H);
+  // bold pulsing amber frame around the whole cell (the come-help-me outline)
+  ctx.globalAlpha = 0.55 + pulse * 0.45;
+  const x1 = x + CELL_W;
+  px(ctx, x, y + 3, CELL_W, 2, amber);          // top
+  px(ctx, x, y + CELL_H - 5, CELL_W, 2, amber);  // bottom
+  px(ctx, x, y + 3, 2, CELL_H - 8, amber);       // left
+  px(ctx, x1 - 2, y + 3, 2, CELL_H - 8, amber);  // right
   ctx.globalAlpha = 1;
-  // amber bubble body + a little tail pointing down toward the head
-  px(ctx, bx - 1, y, 12, 9, '#ffb454');
-  px(ctx, bx - 1, y, 12, 1, '#ffd793');   // top highlight
-  px(ctx, bx - 1, y + 8, 12, 1, '#e08a2a'); // bottom shade
-  px(ctx, bx - 2, y + 2, 1, 5, '#ffb454'); // left round
-  px(ctx, bx + 11, y + 2, 1, 5, '#e89030'); // right round
-  px(ctx, bx, y + 9, 3, 2, '#ffb454');     // tail toward the head
-  px(ctx, bx, y + 11, 1, 1, '#e08a2a');
-  // dark "!" glyph centred in the bubble
-  px(ctx, bx + 4, y + 2, 2, 4, '#3a2606');
-  px(ctx, bx + 4, y + 7, 2, 1, '#3a2606');
+  // --- bobbing amber "!" bubble over the head ---
+  const bob = frame % 6 < 3 ? 0 : 1;
+  const bx = gx + 6, by = y + 16 - bob;
+  ctx.globalAlpha = 0.30 + pulse * 0.28; // halo breathes with the frame
+  px(ctx, bx - 2, by - 1, 16, 13, amber);
+  ctx.globalAlpha = 1;
+  px(ctx, bx - 1, by, 12, 9, amber);            // bubble body
+  px(ctx, bx - 1, by, 12, 1, '#ffd793');        // top highlight
+  px(ctx, bx - 1, by + 8, 12, 1, '#e08a2a');    // bottom shade
+  px(ctx, bx, by + 9, 3, 2, amber);             // tail toward the head
+  px(ctx, bx + 4, by + 2, 2, 4, '#3a2606');     // "!"
+  px(ctx, bx + 4, by + 7, 2, 1, '#3a2606');
 }
 
 // PM crown — a small gold crown bobbing above the lead's head.

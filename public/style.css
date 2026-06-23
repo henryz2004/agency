@@ -13,7 +13,8 @@
   --gold: #ffd166;
   --pink: #ff5cba;
   --pixel: 'Press Start 2P', ui-monospace, monospace;
-  --term: 'Pixelify Sans', ui-monospace, Menlo, monospace;
+  --term: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -62,9 +63,9 @@ html, body {
 
 .topstats { display: flex; align-items: center; gap: 26px; }
 .tstat { text-align: center; }
-.tstat-val { font-size: 30px; line-height: 1; color: var(--green); text-shadow: 0 0 10px rgba(57,217,138,0.4); }
-/* labels switched from 7px Press Start 2P (near-illegible) to a readable pixel face
-   (Pixelify Sans) with a brighter ink — keeps the retro vibe, drops the eye strain. */
+.tstat-val { font-family: var(--pixel); font-size: 18px; line-height: 1.1; color: var(--green); text-shadow: 0 0 10px rgba(57,217,138,0.4); }
+/* labels use a readable mono (IBM Plex Mono); big topbar numbers use Press Start 2P
+   (pixel reads great at display size). Pixel identity = art + headers + numbers. */
 .tstat-lbl { font-family: var(--term); font-size: 15px; color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
 /* burn unit ("tok/min") rides smaller next to the live number so the figure leads */
 .tstat-unit { font-size: 15px; color: var(--muted); text-shadow: none; letter-spacing: 0.5px; }

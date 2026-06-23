@@ -473,6 +473,35 @@ function fillActivityCard(card, a, lastAction, metrics) {
   if (act) setActionLine(act, a, lastAction);
 }
 
+// ---- blocked-background banner --------------------------------------------
+// A needsYou agent is a BACKGROUND agent blocked on the user (state:'blocked').
+// Unlike awaitingReply it holds NO Stop-hook connection, so a reply box here
+// couldn't reach it — the only way in is its own terminal. So instead of a reply
+// box we show WHY it's blocked + point at the attach footer, reusing the amber
+// reply styling so it reads as the same "waiting on you" class of signal.
+function renderBlockedBanner(agent, hasAttach) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cp-reply cp-blocked';
+  const head = document.createElement('div');
+  head.className = 'cp-reply-head';
+  head.innerHTML = '<span class="cp-reply-dot"></span> Blocked — waiting on you in its terminal.';
+  wrap.appendChild(head);
+  // Its parting question, when we have it (same source the reply box uses).
+  if (agent.pendingQuestion) {
+    const q = document.createElement('div');
+    q.className = 'cp-reply-q';
+    q.textContent = agent.pendingQuestion;
+    wrap.appendChild(q);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'cp-reply-q cp-dim';
+  hint.textContent = hasAttach
+    ? 'No live chat hold here — attach in its terminal below to respond and unblock it.'
+    : 'No live chat hold here — reach it in the terminal where it is running to respond.';
+  wrap.appendChild(hint);
+  return wrap;
+}
+
 // ---- reply box (Control Phase-1) ------------------------------------------
 // When the selected agent is paused on a Stop hook (awaitingReply), render a
 // reply box ABOVE the transcript: a textarea + Send that POSTs /api/reply
@@ -623,15 +652,33 @@ function show(agent) {
     return;
   }
 
-  // ---- opencode / codex: no Claude transcript on disk ----------------------
+  // ---- opencode / codex: no Claude transcript, but INLINE metrics ----------
   if (agent.source && agent.source !== 'claude') {
+    // Non-Claude agents carry their 30-min metrics INLINE on the agent object
+    // (their adapter computes them), so render the same status + metrics card
+    // straight from `agent.metrics` — no /api/transcript fetch (that path is
+    // Claude-only). The Claude-vs-non-Claude shape asymmetry is INTENTIONAL: we
+    // don't recompute Claude metrics every poll, so only non-Claude is inline.
     bodyEl.innerHTML = '';
-    bodyEl.appendChild(
-      renderNote(
-        `${esc(agent.source)} agent — transcript peek is Claude Code only.`
-      )
-    );
+    bodyEl.appendChild(renderActivityCard(agent, null, agent.metrics || null));
     const acts = actionsFor(agent, null);
+    if (acts) bodyEl.appendChild(acts);
+    const cust = customizeControls(agent);
+    if (cust) bodyEl.appendChild(cust);
+    return;
+  }
+
+  // ---- needsYou: a BACKGROUND agent blocked on the USER (state:'blocked') -----
+  // It holds NO Stop-hook connection, so the reply box can't resume it — the only
+  // way in is its own terminal. Surface that ACTIONABLE path. This sits ABOVE the
+  // cwd guard below so a cwd-less blocked agent still gets the attach note instead
+  // of dead-ending at "No transcript available". (awaitingReply — interactive,
+  // hook-held — keeps its reply box in the card path.) Net: every amber "!" on
+  // the floor leads to a real next step.
+  if (agent.needsYou && !agent.awaitingReply) {
+    bodyEl.innerHTML = '';
+    const acts = actionsFor(agent, null); // the attach-in-terminal footer = the unblock path
+    bodyEl.appendChild(renderBlockedBanner(agent, !!acts));
     if (acts) bodyEl.appendChild(acts);
     const cust = customizeControls(agent);
     if (cust) bodyEl.appendChild(cust);

@@ -325,11 +325,28 @@ function ensureWaitingPill() {
   if (waitingPill) return waitingPill;
   const stats = document.querySelector('.topstats');
   if (!stats) return null;
+  // come-help-me pulse keyframe, injected once (we own app.js, not style.css)
+  if (!document.getElementById('waiting-kf')) {
+    const s = document.createElement('style');
+    s.id = 'waiting-kf';
+    s.textContent =
+      '@keyframes waitingPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,170,60,0.55),0 0 6px rgba(255,170,60,0.55)}' +
+      '50%{box-shadow:0 0 0 5px rgba(255,170,60,0),0 0 13px rgba(255,170,60,0.95)}}';
+    document.head.appendChild(s);
+  }
   waitingPill = document.createElement('button');
   waitingPill.type = 'button';
   waitingPill.id = 'waitingPill';
   waitingPill.className = 'waiting-pill hidden';
   waitingPill.title = 'Agents paused, waiting for your reply — click to answer';
+  // Strong, unmissable amber treatment (inline visual styles; `display` is left
+  // OUT so the .hidden class still controls show/hide). The amber + bell + pulse
+  // read "come help me", distinct from every other status color.
+  waitingPill.style.cssText =
+    'cursor:pointer;border:1px solid #d98a2a;border-radius:999px;padding:3px 12px;' +
+    'font-weight:700;font-size:12px;letter-spacing:.2px;color:#3a2606;' +
+    'background:linear-gradient(180deg,#ffd27a,#ffae3d);' +
+    'animation:waitingPulse 1.25s ease-in-out infinite;white-space:nowrap;';
   // Insert before the LIVE pill so it reads alongside the status chips.
   const live = stats.querySelector('.live-pill');
   if (live) stats.insertBefore(waitingPill, live);
@@ -745,7 +762,7 @@ function renderDaily(usage) {
   });
   // baseline + max label
   ctx.fillStyle = '#5b6478';
-  ctx.font = '11px "Pixelify Sans", monospace';
+  ctx.font = '11px "IBM Plex Mono", monospace';
   ctx.fillText(`peak ${fmt(max)} tok`, 2, cssH - 1);
   ctx.textAlign = 'right';
   ctx.fillText(`${days.length}d`, cssW - 2, cssH - 1);
