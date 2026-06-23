@@ -403,6 +403,12 @@
   flex-direction: column;
   gap: 8px;
 }
+/* the blocked banner reuses .cp-reply but drops the loud amber outline + fill —
+   the gold dot + heading already read as "blocked"; keep the box quiet. */
+.cp-blocked {
+  border-color: var(--line);
+  background: var(--card2);
+}
 .cp-reply-head {
   font-size: var(--t-sub);
   color: var(--gold);

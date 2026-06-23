@@ -331,6 +331,11 @@ html, body {
 /* ---- "Now" view cards ---- */
 .now-card { background: linear-gradient(180deg, #102016, #0c1410); border-color: #1d5a3a; }
 .now-card #nowBurn { font-size: var(--t-hero); line-height: 0.95; color: #fff; text-shadow: 0 0 18px rgba(57,217,138,0.55); }
+/* live output-token rate sparkline (last ~30 min), drawn under the burn figure */
+.burnspark {
+  width: 100%; height: 46px; display: block; margin-top: 10px;
+  image-rendering: pixelated;
+}
 .now-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; }
 .now-stat { text-align: center; }
 .now-k { font-size: var(--t-big); line-height: 1; color: var(--green); }

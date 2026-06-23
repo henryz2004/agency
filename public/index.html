@@ -74,7 +74,8 @@
         <div class="card now-card">
           <div class="card-title">Burning now <span class="card-title-hint">live output</span></div>
           <div class="bignum"><span id="nowBurn">0</span><span class="bignum-unit" id="nowBurnUnit">tok/min</span></div>
-          <div class="card-note" id="nowBurnNote">output tokens over the last 5 min · 0 when idle</div>
+          <div class="card-note" id="nowBurnNote">output tokens over the last ~60s · 0 when idle</div>
+          <canvas id="burnSpark" class="burnspark" aria-hidden="true"></canvas>
         </div>
 
         <div class="card">

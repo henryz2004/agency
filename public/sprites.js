@@ -157,9 +157,11 @@ export function drawWall(ctx, bufW, wallH, frame, mood = MOODS.day) {
   }
   // wall clock high-centre
   drawClock(ctx, Math.round(bufW * 0.46), wy + 16, frame);
-  // a framed landscape picture + a calendar near the left
-  drawPicture(ctx, 14, wy + 20);
-  drawCalendar(ctx, 34, wy + 20);
+  // upper-left corner: a framed landscape picture with the calendar tucked neatly
+  // beneath it (stacked + left-aligned). Both sit left of x≈30, clear of the window
+  // row that starts at x≈40 — so the calendar no longer overlaps the first window.
+  drawPicture(ctx, 14, wy + 18);
+  drawCalendar(ctx, 15, wy + 34);
   // a small green glass whiteboard centre-right
   drawGlassBoard(ctx, Math.round(bufW * 0.5) + 8, wy + 16);
 

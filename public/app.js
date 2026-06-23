@@ -145,15 +145,28 @@ function onState() {
 // ---- topbar live token-burn ----------------------------------------------
 // The honest "what's happening NOW": a LIVE output-token rate derived from
 // poll-to-poll deltas of usage.lifetime.out (which is MONOTONIC — it never
-// resets, unlike today.out which zeroes at midnight). We keep a short trailing
-// window of {t, out} samples and compute rate = (newest.out - oldest.out) over
-// the elapsed minutes, so it reads ~0 when idle and spikes on a burst — the
-// genuine bursty signal. NO averages, no $-framing here (that moved to the
-// Analytics tab). Guards: a missing/backwards lifetime.out never produces a
-// rate; the FIRST sample (no prior) shows 0, never a phantom spike.
-const BURN_WINDOW_MS = 5 * 60 * 1000; // 5-minute trailing window
+// resets, unlike today.out which zeroes at midnight). We keep a trailing
+// window of {t, out} samples and compute rate over the elapsed minutes, so it
+// reads ~0 when idle and spikes on a burst — the genuine bursty signal. NO
+// averages, no $-framing here (that moved to the Analytics tab). Guards: a
+// missing/backwards lifetime.out never produces a rate; the FIRST sample (no
+// prior) shows 0, never a phantom spike.
+//
+// Two windows over the SAME sample buffer:
+//   - HEADLINE (~60s): drives both the topbar `tsBurn` and the panel `#nowBurn`.
+//     Short so it reacts fast to bursts and settles to ~0 when idle, but uses
+//     samples (≈20s apart on a 3s poll → a couple of samples) so it doesn't
+//     flicker wildly poll-to-poll.
+//   - HISTORY (~30 min): the full sample buffer we retain to chart the rate
+//     over time (see burnRateHistory / renderBurnSpark).
+const BURN_HEADLINE_MS = 60 * 1000; // ~60s trailing window for the headline figure
+const BURN_HISTORY_MS = 30 * 60 * 1000; // ~30-min sample history kept for the chart
+const BURN_WINDOW_MS = BURN_HISTORY_MS; // (back-compat alias: the retained span)
 const burnSamples = []; // [{ t: ms, out: lifetime.out }], oldest→newest
-let liveBurnPerMin = 0; // tokens/min over the window (0 = idle/unknown)
+let liveBurnPerMin = 0; // tokens/min over the ~60s headline window (0 = idle/unknown)
+// Rate history for the sparkline: one {t, rate} point per poll, derived from the
+// instantaneous poll-to-poll delta. Spans ~30 min; oldest→newest.
+const burnRateHistory = []; // [{ t: ms, rate: tok/min }]
 
 function sampleBurn(usage) {
   const out = usage && usage.lifetime ? usage.lifetime.out : null;
@@ -172,23 +185,49 @@ function sampleBurn(usage) {
     burnSamples.length = 0;
     burnSamples.push({ t: now, out });
     liveBurnPerMin = 0;
+    pushBurnRate(now, 0);
     return;
   }
   burnSamples.push({ t: now, out });
-  // Drop samples older than the window (always keep ≥1 so we have a baseline).
-  while (burnSamples.length > 1 && now - burnSamples[0].t > BURN_WINDOW_MS) {
+  // Drop samples older than the HISTORY span (always keep ≥1 so we have a
+  // baseline, and so the chart retains ~30 min of rate context).
+  while (burnSamples.length > 1 && now - burnSamples[0].t > BURN_HISTORY_MS) {
     burnSamples.shift();
   }
   // First sample ever (no prior) → no delta → 0, never a huge spike.
-  if (burnSamples.length < 2) {
+  if (!prev) {
     liveBurnPerMin = 0;
+    pushBurnRate(now, 0);
     return;
   }
-  const oldest = burnSamples[0];
+
+  // Headline figure: rate over the trailing ~60s window. Find the oldest sample
+  // still within BURN_HEADLINE_MS of now (fall back to the second-newest so we
+  // always have a baseline once ≥2 samples exist) and measure across it.
+  let base = null;
+  for (let i = burnSamples.length - 1; i >= 0; i--) {
+    if (now - burnSamples[i].t <= BURN_HEADLINE_MS) base = burnSamples[i];
+    else break;
+  }
+  if (!base || base === burnSamples[burnSamples.length - 1]) {
+    base = burnSamples[burnSamples.length - 2] || burnSamples[0];
+  }
   const newest = burnSamples[burnSamples.length - 1];
-  const minutes = (newest.t - oldest.t) / 60000;
-  const deltaOut = newest.out - oldest.out;
-  liveBurnPerMin = minutes > 0 ? Math.max(0, deltaOut / minutes) : 0;
+  const minutes = (newest.t - base.t) / 60000;
+  liveBurnPerMin = minutes > 0 ? Math.max(0, (newest.out - base.out) / minutes) : 0;
+
+  // History point for the chart: the instantaneous rate since the previous poll.
+  const dtMin = (now - prev.t) / 60000;
+  const instRate = dtMin > 0 ? Math.max(0, (out - prev.out) / dtMin) : 0;
+  pushBurnRate(now, instRate);
+}
+
+// Append a rate point and trim the history to the ~30-min span.
+function pushBurnRate(t, rate) {
+  burnRateHistory.push({ t, rate: Number.isFinite(rate) ? Math.max(0, rate) : 0 });
+  while (burnRateHistory.length > 1 && t - burnRateHistory[0].t > BURN_HISTORY_MS) {
+    burnRateHistory.shift();
+  }
 }
 
 function updateTopbarBurn() {
@@ -198,7 +237,7 @@ function updateTopbarBurn() {
   const active = liveBurnPerMin > 0;
   valEl.innerHTML = `${fmtBurn(liveBurnPerMin)} <span class="tstat-unit">tok/min</span>`;
   if (lblEl) lblEl.textContent = active ? 'burning now' : 'idle';
-  valEl.title = 'live output-token rate over the last ~5 min (0 when idle)';
+  valEl.title = 'live output-token rate over the last ~60s (0 when idle)';
 }
 
 // Burn-specific number format: keep one decimal in the k range so "12.4k" reads,
@@ -342,9 +381,11 @@ function ensureWaitingPill() {
   // Strong, unmissable amber treatment (inline visual styles; `display` is left
   // OUT so the .hidden class still controls show/hide). The amber + bell + pulse
   // read "come help me", distinct from every other status color.
+  // Pixel font comes from the .waiting-pill class; sized to the topbar chip scale
+  // (8px) so it matches the LIVE pill instead of towering over the stats.
   waitingPill.style.cssText =
-    'cursor:pointer;border:1px solid #d98a2a;border-radius:999px;padding:3px 12px;' +
-    'font-weight:700;font-size:12px;letter-spacing:.2px;color:#3a2606;' +
+    'cursor:pointer;border:1px solid #d98a2a;border-radius:999px;padding:5px 11px;' +
+    'font-size:8px;letter-spacing:1px;color:#3a2606;' +
     'background:linear-gradient(180deg,#ffd27a,#ffae3d);' +
     'animation:waitingPulse 1.25s ease-in-out infinite;white-space:nowrap;';
   // Insert before the LIVE pill so it reads alongside the status chips.
@@ -385,9 +426,11 @@ function renderNow(counts, usage) {
   const burnNote = $('nowBurnNote');
   if (burnNote) {
     burnNote.textContent = liveBurnPerMin > 0
-      ? 'output tokens / min over the last ~5 min'
+      ? 'output tokens / min over the last ~60s'
       : 'no output flowing right now · 0 when idle';
   }
+  // Live rate sparkline (last ~30 min of output-token rate).
+  renderBurnSpark();
 
   // Working / shell / idle breakdown of the floor.
   setText('nowGenerating', workingCount);
@@ -480,6 +523,95 @@ function renderNowTools(usage) {
 function setText(id, v) {
   const el = $(id);
   if (el) el.textContent = String(v);
+}
+
+// ---- live burn sparkline --------------------------------------------------
+// A small, clean line/area chart of the output-token RATE over the last ~30 min,
+// drawn in the "Burning now" card below the headline number. Mirrors
+// renderDaily's canvas pattern: size to clientWidth × a fixed height, scale by
+// devicePixelRatio for crisp pixels, clear+redraw each poll. Green line + soft
+// fill, retro-appropriate. Fail-soft: never throws — an empty/just-started
+// history draws a flat baseline at 0.
+const GREEN = '#39d98a';
+
+function renderBurnSpark() {
+  const cv = $('burnSpark');
+  if (!cv || typeof cv.getContext !== 'function') return;
+  try {
+    const cssW = cv.clientWidth || 300;
+    const cssH = 46;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.max(1, Math.round(cssW * dpr));
+    cv.height = Math.round(cssH * dpr);
+    cv.style.height = cssH + 'px';
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const padT = 4;
+    const padB = 3;
+    const baseY = cssH - padB; // y of the 0 line
+    const plotH = baseY - padT;
+
+    // Baseline (the 0 floor) — always drawn so an empty/idle chart reads as flat 0.
+    ctx.strokeStyle = 'rgba(57,217,138,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY + 0.5);
+    ctx.lineTo(cssW, baseY + 0.5);
+    ctx.stroke();
+
+    const pts = burnRateHistory;
+    if (!pts || pts.length === 0) return;
+
+    // X maps over a fixed ~30-min span so the line "scrolls" as time passes and
+    // doesn't rescale jarringly when only a few samples exist. Anchor the right
+    // edge at the newest sample's time (or now), and map older points left.
+    const now = pts[pts.length - 1].t;
+    const span = BURN_HISTORY_MS;
+    const xFor = (t) => {
+      const frac = 1 - (now - t) / span; // 1 = right edge (now), 0 = span ago
+      return Math.max(0, Math.min(1, frac)) * cssW;
+    };
+    const max = Math.max(1, ...pts.map((p) => p.rate || 0)); // 1 floor → no /0
+    const yFor = (rate) => baseY - (Math.max(0, rate) / max) * plotH;
+
+    // Single point (just started): show a flat line at its level, not a dot only.
+    const line = [];
+    for (const p of pts) line.push([xFor(p.t), yFor(p.rate || 0)]);
+    if (line.length === 1) line.unshift([0, line[0][1]]);
+
+    // Soft fill under the line.
+    const grad = ctx.createLinearGradient(0, padT, 0, baseY);
+    grad.addColorStop(0, 'rgba(57,217,138,0.28)');
+    grad.addColorStop(1, 'rgba(57,217,138,0.02)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(line[0][0], baseY);
+    for (const [x, y] of line) ctx.lineTo(x, y);
+    ctx.lineTo(line[line.length - 1][0], baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    // The rate line on top.
+    ctx.strokeStyle = GREEN;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    line.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.stroke();
+
+    // A subtle dot at the newest point so "now" reads as live.
+    const head = line[line.length - 1];
+    ctx.fillStyle = GREEN;
+    ctx.beginPath();
+    ctx.arc(head[0], head[1], 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  } catch (e) {
+    // Fail-soft: a render hiccup must never blank the dashboard.
+  }
 }
 
 // ---- manpower -------------------------------------------------------------
@@ -876,6 +1008,7 @@ window.addEventListener('resize', () => {
   if (STATE) {
     renderManpower();
     renderDaily(STATE.usage);
+    renderBurnSpark();
   }
 });
 

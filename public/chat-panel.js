@@ -708,10 +708,26 @@ function show(agent) {
   if (agent.needsYou && !agent.awaitingReply) {
     bodyEl.innerHTML = '';
     const acts = actionsFor(agent, null); // the attach-in-terminal footer = the unblock path
-    bodyEl.appendChild(renderBlockedBanner(agent, !!acts));
+    const banner = renderBlockedBanner(agent, !!acts);
+    bodyEl.appendChild(banner);
     if (acts) bodyEl.appendChild(acts);
     const cust = customizeControls(agent);
     if (cust) bodyEl.appendChild(cust);
+    // A blocked BACKGROUND agent still has a transcript on disk — surface its last
+    // message(s) too (it used to show only the attach banner), so you can see what
+    // it's blocked on without attaching. Fetched async, inserted just below the banner.
+    if (agent.source === 'claude' && agent.sessionId && agent.cwd) {
+      const token = reqToken; // bumped at the top of show(); a newer selection bails this
+      const url = `/api/transcript?sessionId=${encodeURIComponent(agent.sessionId)}&cwd=${encodeURIComponent(agent.cwd)}`;
+      fetch(url, { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((data) => {
+          if (token !== reqToken || !banner.parentNode) return; // superseded / detached
+          const lastMsgs = renderLastMessages(data && data.messages);
+          if (lastMsgs) banner.insertAdjacentElement('afterend', lastMsgs);
+        })
+        .catch(() => { /* fail-soft — keep the banner */ });
+    }
     return;
   }
 

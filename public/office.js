@@ -31,7 +31,9 @@ let cells = [];      // {x, y, agent} — flattened, in draw order
 let avatar = null;                  // the player (created in initOffice, off by default)
 let lastT = 0;                      // last loop timestamp → real dt for motion
 let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built in JS)
-const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1 }; // roaming pet (dir: +1 faces right)
+// roaming pet: dir +1 faces right; sit→sleep when it rests a while; `petted` is
+// set while the walking avatar is right next to it (→ wakes + hearts in drawCat).
+const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1, sleeping: false, petted: false };
 
 // DOM overlay layer: real (crisp) HTML text for the name chips + repo labels,
 // instead of canvas pixel text. One wrapper div over the canvas, scaled by
@@ -323,22 +325,45 @@ function drawKitchen(z) {
   px(ctx, vx + 12, y + 4, 3, 6, '#0d1018'); // dispense slot
 }
 
-function drawCat(x, y, frame, dir = 1) {
+function drawCat(x, y, frame, dir = 1, opts = {}) {
   x = Math.round(x); y = Math.round(y);
-  const tail = frame % 8 < 4 ? 0 : 1;
+  const { sleeping = false, petted = false } = opts;
+  const body = '#23252c';
   // The art faces right; mirror about the body centre (~x+5) to face left so the
   // cat walks the way it's heading instead of moonwalking backwards.
   const flip = dir < 0;
   if (flip) { ctx.save(); ctx.translate((x + 5) * 2, 0); ctx.scale(-1, 1); }
-  px(ctx, x, y - 6, 8, 6, '#23252c');   // body
-  px(ctx, x + 6, y - 11, 6, 6, '#23252c'); // head
-  px(ctx, x + 6, y - 13, 2, 3, '#23252c'); // ears
-  px(ctx, x + 10, y - 13, 2, 3, '#23252c');
-  px(ctx, x + 8, y - 9, 1, 1, '#6cff9a'); // eye
-  px(ctx, x + 10, y - 9, 1, 1, '#6cff9a');
-  px(ctx, x - 2, y - 8 - tail, 2, 6, '#23252c'); // tail
-  px(ctx, x + 1, y, 1, 1, '#23252c'); px(ctx, x + 5, y, 1, 1, '#23252c'); // paws
+  if (sleeping) {
+    // curled up, lower profile, eyes shut, slow breathing; a "z" drifts above.
+    const br = frame % 16 < 8 ? 0 : 1;               // slow breathe
+    px(ctx, x, y - 4 - br, 11, 4 + br, body);        // curled body (wider + lower)
+    px(ctx, x + 7, y - 5 - br, 5, 4, body);          // tucked head
+    px(ctx, x + 8, y - 7 - br, 2, 2, body);          // one folded ear
+    px(ctx, x + 8, y - 3 - br, 2, 1, '#3a3d45');     // closed eye (a line)
+    px(ctx, x - 1, y - 1, 6, 1, body);               // tail wrapped round the front
+    const zz = '#9aa3b5', zy = y - 11 - (frame % 8 < 4 ? 0 : 1); // "z" bobs slowly
+    px(ctx, x + 12, zy, 3, 1, zz); px(ctx, x + 13, zy + 1, 1, 1, zz); px(ctx, x + 12, zy + 2, 3, 1, zz);
+  } else {
+    const tail = frame % 8 < 4 ? 0 : 1;
+    px(ctx, x, y - 6, 8, 6, body);        // body
+    px(ctx, x + 6, y - 11, 6, 6, body);   // head
+    px(ctx, x + 6, y - 13, 2, 3, body);   // ears
+    px(ctx, x + 10, y - 13, 2, 3, body);
+    px(ctx, x + 8, y - 9, 1, 1, '#6cff9a'); // eyes
+    px(ctx, x + 10, y - 9, 1, 1, '#6cff9a');
+    if (petted) px(ctx, x - 2, y - 12, 2, 7, body);  // happy upright tail
+    else px(ctx, x - 2, y - 8 - tail, 2, 6, body);   // lazy tail flick
+    px(ctx, x + 1, y, 1, 1, body); px(ctx, x + 5, y, 1, 1, body); // paws
+  }
   if (flip) ctx.restore();
+  // petting hearts float up over the cat (drawn UNflipped so they read upright).
+  if (petted) {
+    const hx = x + 3, hy = y - 16 - (frame % 6), pink = '#ff6b9d';
+    px(ctx, hx, hy, 1, 1, pink); px(ctx, hx + 2, hy, 1, 1, pink);
+    px(ctx, hx - 1, hy + 1, 5, 1, pink);
+    px(ctx, hx, hy + 2, 3, 1, pink);
+    px(ctx, hx + 1, hy + 3, 1, 1, pink);
+  }
 }
 
 function drawDog(x, y) {
@@ -645,7 +670,15 @@ function applyCam() {
 function clampPan() {
   const vp = viewportRect();
   const w = bufW * UPSCALE * cam.s, h = bufH * UPSCALE * cam.s;
-  const KEEP = 80; // always keep at least this much office on-screen
+  if (avatar && avatar.enabled) {
+    // Walk mode: CONFINE the camera so the view never shows past the office —
+    // the floor always fills the frame (centred on an axis where it's smaller
+    // than the frame). cam.x ∈ [vp.width - w, 0] keeps both edges flush.
+    cam.x = w >= vp.width ? clampN(cam.x, vp.width - w, 0) : (vp.width - w) / 2;
+    cam.y = h >= vp.height ? clampN(cam.y, vp.height - h, 0) : (vp.height - h) / 2;
+    return;
+  }
+  const KEEP = 80; // free pan/zoom: always keep at least this much office on-screen
   cam.x = clampN(cam.x, KEEP - w, vp.width - KEEP);
   cam.y = clampN(cam.y, KEEP - h, vp.height - KEEP);
 }
@@ -921,14 +954,37 @@ function updateCat(dt, now) {
     cat.sit = true; cat.until = now + 1500; cat.init = true;
   }
   cat.x = clampN(cat.x, minX, maxX); cat.y = clampN(cat.y, minY, maxY); // re-clamp after a reshape
+
+  // Petting: while the walking avatar is right next to the cat, it wakes, sits
+  // happily, and emits hearts (drawn in drawCat). Re-checked every tick so a
+  // lingering pet keeps it awake; stepping away lets it drift back to napping.
+  cat.petted = false;
+  if (avatar && avatar.enabled) {
+    const pd = Math.hypot(avatar.pos.x - cat.x, avatar.pos.y - cat.y);
+    if (pd < 22) {
+      cat.petted = true;
+      cat.sleeping = false;
+      cat.sit = true;
+      if (cat.until < now + 900) cat.until = now + 900; // stay put a beat to be petted
+    }
+  }
+
   if (now >= cat.until) {
-    if (cat.sit) {
-      cat.sit = false;
-      cat.tx = minX + Math.round(Math.random() * (maxX - minX));
-      cat.ty = minY + Math.round(Math.random() * (maxY - minY));
-      cat.until = now + 5000 + Math.random() * 4000; // safety cap before it must rest
+    if (cat.sleeping) {
+      // wake from a nap → sit a moment, then resume roaming
+      cat.sleeping = false; cat.sit = true; cat.until = now + 1400 + Math.random() * 2200;
+    } else if (cat.sit) {
+      // resting done → usually curl up for a nap, otherwise wander to a new spot
+      if (!cat.petted && Math.random() < 0.45) {
+        cat.sleeping = true; cat.until = now + 9000 + Math.random() * 9000; // a good nap
+      } else {
+        cat.sit = false;
+        cat.tx = minX + Math.round(Math.random() * (maxX - minX));
+        cat.ty = minY + Math.round(Math.random() * (maxY - minY));
+        cat.until = now + 5000 + Math.random() * 4000; // safety cap before it must rest
+      }
     } else {
-      cat.sit = true; cat.until = now + 2200 + Math.random() * 4500; // rest a while
+      cat.sit = true; cat.until = now + 2200 + Math.random() * 4500; // arrived → rest a while
     }
   }
   if (!cat.sit) {
@@ -973,7 +1029,7 @@ function draw() {
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
   // Floor entities last, so the roaming pet + the player float above the desks.
-  if (cat.init) drawCat(cat.x, cat.y, frame, cat.dir);
+  if (cat.init) drawCat(cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted });
   if (avatar && avatar.enabled) avatar.draw(ctx);
 }
 
