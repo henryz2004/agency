@@ -160,6 +160,7 @@
   text-transform: uppercase; color: var(--muted2); margin-right: 5px;
 }
 .cp-act-target { color: var(--cyan); }
+.cp-dim { color: var(--muted2); } /* generic dim (blocked-banner hint, etc.) */
 .cp-act-now .cp-dim { color: var(--muted2); }
 .cp-act-sub { font-size: 14px; color: #46d6cf; }
 
