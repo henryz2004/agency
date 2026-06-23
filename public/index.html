@@ -21,26 +21,30 @@
         <div class="brand-sub">your one-person AI workforce</div>
       </div>
     </div>
-    <div class="topstats">
-      <div class="tstat">
-        <div class="tstat-val" id="tsLive">0</div>
-        <div class="tstat-lbl">on the floor</div>
+    <div class="topright">
+      <div class="topstats">
+        <div class="tstat">
+          <div class="tstat-val" id="tsLive">0</div>
+          <div class="tstat-lbl">on the floor</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-val" id="tsGenerating">0</div>
+          <div class="tstat-lbl">generating now</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-val" id="tsBurn">0 <span class="tstat-unit">tok/min</span></div>
+          <div class="tstat-lbl" id="tsBurnLbl">idle</div>
+        </div>
+        <div class="tstat">
+          <div class="tstat-val" id="tsTeams">0</div>
+          <div class="tstat-lbl">teams</div>
+        </div>
       </div>
-      <div class="tstat">
-        <div class="tstat-val" id="tsGenerating">0</div>
-        <div class="tstat-lbl">generating now</div>
+      <div class="topctrls">
+        <div class="live-pill"><span class="rec"></span> LIVE</div>
+        <button id="soundToggle" class="sound-toggle" type="button" aria-pressed="false" title="Toggle office sound">🔇</button>
+        <button id="panelToggle" class="panel-toggle active" type="button" title="Toggle stats panel">📊</button>
       </div>
-      <div class="tstat">
-        <div class="tstat-val" id="tsBurn">0 <span class="tstat-unit">tok/min</span></div>
-        <div class="tstat-lbl" id="tsBurnLbl">idle</div>
-      </div>
-      <div class="tstat">
-        <div class="tstat-val" id="tsTeams">0</div>
-        <div class="tstat-lbl">teams</div>
-      </div>
-      <div class="tstat live-pill"><span class="rec"></span> LIVE</div>
-      <button id="soundToggle" class="sound-toggle" type="button" aria-pressed="false" title="Toggle office sound">🔇</button>
-      <button id="panelToggle" class="panel-toggle active" type="button" title="Toggle stats panel">📊</button>
     </div>
   </header>
 

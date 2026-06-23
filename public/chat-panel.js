@@ -599,6 +599,36 @@ function renderReplyBox(agent) {
   return wrap;
 }
 
+// The agent's most recent turn(s), so you can tell at a glance which real
+// session a desk maps to (the rest of the panel is honest-status only). Renders
+// the last assistant + user turn from /api/transcript's `messages`, each clipped.
+function renderLastMessages(messages) {
+  if (!Array.isArray(messages) || !messages.length) return null;
+  const recent = messages.slice(-2); // last turn + the prior one for context
+  const card = document.createElement('div');
+  card.className = 'cp-lastmsg';
+  const head = document.createElement('div');
+  head.className = 'cp-lastmsg-head';
+  head.textContent = recent.length > 1 ? 'Last messages' : 'Last message';
+  card.appendChild(head);
+  for (const m of recent) {
+    const assistant = m && m.role === 'assistant';
+    const row = document.createElement('div');
+    row.className = 'cp-msg ' + (assistant ? 'cp-msg-agent' : 'cp-msg-you');
+    const who = document.createElement('span');
+    who.className = 'cp-msg-who';
+    who.textContent = assistant ? 'agent' : 'you';
+    const txt = document.createElement('div');
+    txt.className = 'cp-msg-text';
+    const t = String((m && m.text) || '').replace(/\s+/g, ' ').trim();
+    txt.textContent = t.length > 300 ? t.slice(0, 299) + '…' : t;
+    row.appendChild(who);
+    row.appendChild(txt);
+    card.appendChild(row);
+  }
+  return card;
+}
+
 // ---- selection flow -------------------------------------------------------
 
 function show(agent) {
@@ -729,6 +759,9 @@ function show(agent) {
       bodyEl.innerHTML = '';
       if (replyBox) bodyEl.appendChild(replyBox);
       bodyEl.appendChild(activityCard);
+      // The last message(s) — surfaced so a desk is identifiable as a real session.
+      const lastMsgs = renderLastMessages(data && data.messages);
+      if (lastMsgs) bodyEl.appendChild(lastMsgs);
       if (newActs) bodyEl.appendChild(newActs);
       // Re-append the customize controls — the rebuild cleared bodyEl. Reuse the
       // same element (innerHTML='' only detached it) so any half-typed rename or

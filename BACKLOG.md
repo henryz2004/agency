@@ -28,6 +28,29 @@ never-phones-home design is the opposite of what this needs.
 _Sequencing:_ nail the single-player core first (current rounds) — it's both what people
 install and the video. Social/city is Phase 2 on a backend.
 
+## Floor life, interaction & metrics (surfaced 2026-06-22)
+
+Maintainer brain-dump toward "the floor feels alive". Rough priority top→bottom;
+none blocking. (Small same-day wins already shipped: lowercase `folder/` desk
+labels, freshly-idle wave+bob.)
+
+- **Idle agents leave their desk** — when idle, a worker can get up and wander,
+  sit on the couch, or visit the vending machine, then return. The headline
+  "living office" item; supersedes the old "idle-wander". Needs a walk cycle + a
+  small wander/seek state machine + seat/destination anchors from the decor zones.
+- **Background cohesion pass** — the floor reads as "islands of things" with no
+  plan (e.g. the calendar overlaps a window). Lay the wall + floor props out
+  deliberately — no overlaps, sensible groupings — so it reads as one designed
+  room, not scattered decor.
+- **"Burning now" → live + history** — drop the 5-min trailing average for a more
+  live read, and add a line chart / sparkline of output-tokens over time so you
+  can see longer-term activity patterns, not just an instantaneous number.
+- **Walk-mode camera fully confined** — in walk/first-person mode, clamp the
+  camera so the view never shows past the office bounds (no black gutter); center
+  when the floor is smaller than the viewport. (`clampPan` / `followAvatar`.)
+- **Pet animations + interaction** — the cat (and dog) get awake/sleeping states
+  and little idle animations; let the avatar walk up and interact (pet them).
+
 ## Deferred
 
 - **Make hybrid the default** — once the `?render=hybrid` Neighborhoods view is

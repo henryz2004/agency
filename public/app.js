@@ -273,7 +273,7 @@ function clearUnread(sessionId) {
 let unreadPill = null;
 function ensureUnreadPill() {
   if (unreadPill) return unreadPill;
-  const stats = document.querySelector('.topstats');
+  const stats = document.querySelector('.topctrls') || document.querySelector('.topstats');
   if (!stats) return null;
   unreadPill = document.createElement('button');
   unreadPill.type = 'button';
@@ -323,7 +323,7 @@ let waitingPill = null;
 
 function ensureWaitingPill() {
   if (waitingPill) return waitingPill;
-  const stats = document.querySelector('.topstats');
+  const stats = document.querySelector('.topctrls') || document.querySelector('.topstats');
   if (!stats) return null;
   // come-help-me pulse keyframe, injected once (we own app.js, not style.css)
   if (!document.getElementById('waiting-kf')) {
@@ -859,8 +859,13 @@ bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
     btn.classList.toggle('on', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
-  // Reflect the saved pref visually, but do NOT start audio until a gesture.
-  paint(initSoundPref());
+  // The button reflects the ACTUAL audio state, which is OFF on load: the browser
+  // won't run audio until a user gesture, so a saved "on" pref can't honestly show
+  // as active yet (it's honored on the first click by toggleSound). We still LOAD
+  // the pref so that first click resumes — we just don't paint the button active
+  // while it's silent.
+  initSoundPref();
+  paint(false);
   btn.addEventListener('click', () => {
     const on = toggleSound(); // creates/resumes AudioContext on first enable
     paint(on);

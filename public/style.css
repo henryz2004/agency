@@ -15,6 +15,23 @@
   --pixel: 'Press Start 2P', ui-monospace, monospace;
   --term: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  /* ---- type scale ---------------------------------------------------------
+     One mono ramp for body/labels, a few display sizes, and a small pixel set —
+     replaces the old ~18 ad-hoc px values. Press Start 2P renders ~1.4x larger
+     per px than the mono, so its sizes are intentionally the smaller numbers.
+     Keep the pixel font for ONLY: the wordmark, topbar stat numbers, section
+     caps/titles, and tiny chips. Everything else is mono. */
+  --t-fine: 11px;   /* captions / meta / fine print */
+  --t-sub:  12px;   /* secondary labels, hints, notes */
+  --t-body: 13px;   /* body, list rows (the default) */
+  --t-val:  15px;   /* emphasized inline values / info-card name */
+  --t-h:    20px;   /* small headline numbers */
+  --t-big:  28px;   /* stat numbers */
+  --t-hero: 44px;   /* hero numbers (headcount, payroll, burn) */
+  --p-chip: 8px;    /* pixel chips / badges / tier / lead */
+  --p-cap:  9px;    /* pixel section caps / card titles / toggles */
+  --p-num:  14px;   /* pixel display numbers */
 }
 
 * { box-sizing: border-box; }
@@ -27,6 +44,8 @@ html, body {
     var(--bg);
   color: var(--ink);
   font-family: var(--term);
+  /* a calm 13px baseline so inherited text isn't the browser's silent 16px */
+  font-size: var(--t-body);
   overflow: hidden;
 }
 
@@ -54,23 +73,30 @@ html, body {
   border-bottom: 2px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 14px; }
-.logo { font-size: 30px; filter: drop-shadow(0 0 8px rgba(57,217,138,0.4)); }
+.logo { font-size: 26px; filter: drop-shadow(0 0 8px rgba(57,217,138,0.4)); }
 .brand-name {
-  font-family: var(--pixel); font-size: 18px; letter-spacing: 2px;
+  font-family: var(--pixel); font-size: 16px; letter-spacing: 2px;
   color: #fff; text-shadow: 0 0 10px rgba(92,208,255,0.5), 2px 2px 0 #1b2740;
 }
-.brand-sub { font-size: 17px; color: var(--muted); margin-top: 3px; letter-spacing: 1px; }
+.brand-sub { font-size: var(--t-sub); color: var(--muted); margin-top: 3px; letter-spacing: 1px; }
 
-.topstats { display: flex; align-items: center; gap: 26px; }
+/* right side of the topbar: the live stats, then a divided controls cluster */
+.topright { display: flex; align-items: center; gap: 22px; }
+.topstats { display: flex; align-items: center; gap: 20px; }
+.topctrls {
+  display: flex; align-items: center; gap: 10px;
+  padding-left: 22px; border-left: 1px solid var(--line);
+}
 .tstat { text-align: center; }
-.tstat-val { font-family: var(--pixel); font-size: 18px; line-height: 1.1; color: var(--green); text-shadow: 0 0 10px rgba(57,217,138,0.4); }
+.tstat-val { font-family: var(--pixel); font-size: var(--p-num); line-height: 1.1; color: var(--green); text-shadow: 0 0 10px rgba(57,217,138,0.4); }
 /* labels use a readable mono (IBM Plex Mono); big topbar numbers use Press Start 2P
    (pixel reads great at display size). Pixel identity = art + headers + numbers. */
-.tstat-lbl { font-family: var(--term); font-size: 15px; color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
-/* burn unit ("tok/min") rides smaller next to the live number so the figure leads */
-.tstat-unit { font-size: 15px; color: var(--muted); text-shadow: none; letter-spacing: 0.5px; }
+.tstat-lbl { font-family: var(--term); font-size: var(--t-fine); color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
+/* burn unit ("tok/min") rides smaller next to the live number so the figure leads;
+   mono (not the blocky pixel) so it reads as a clean unit, not a second stat. */
+.tstat-unit { font-family: var(--term); font-size: var(--t-fine); color: var(--muted); text-shadow: none; letter-spacing: 0.5px; }
 .live-pill {
-  font-family: var(--pixel); font-size: 8px; color: var(--pink); letter-spacing: 2px;
+  font-family: var(--pixel); font-size: var(--p-chip); color: var(--pink); letter-spacing: 2px;
   display: flex; align-items: center; gap: 7px; padding: 6px 10px;
   border: 1px solid #3a2336; border-radius: 4px; background: #1a1018;
 }
@@ -81,7 +107,7 @@ html, body {
    turn the user hasn't opened yet. Cyan = "new, for you" (distinct from the gold
    "needs-you" waiting pill and the pink LIVE rec). Click jumps to the first. */
 .unread-pill {
-  font-family: var(--pixel); font-size: 8px; letter-spacing: 1px;
+  font-family: var(--pixel); font-size: var(--p-chip); letter-spacing: 1px;
   color: #04222e; background: var(--cyan); border: 1px solid var(--cyan);
   border-radius: 999px; padding: 6px 11px; cursor: pointer; line-height: 1;
   white-space: nowrap; box-shadow: 0 0 10px rgba(92,208,255,0.45);
@@ -93,7 +119,7 @@ html, body {
 
 /* sound toggle */
 .sound-toggle {
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 16px; line-height: 1; cursor: pointer;
   width: 38px; height: 34px; padding: 0;
   border: 1px solid var(--line); border-radius: 4px;
   background: #0c111b; color: var(--ink);
@@ -126,7 +152,7 @@ html, body {
 .recenter {
   position: absolute; left: 12px; bottom: 12px; z-index: 20;
   display: none; align-items: center; gap: 6px; cursor: pointer;
-  font-family: var(--term); font-size: 16px; line-height: 1;
+  font-family: var(--term); font-size: var(--t-body); line-height: 1;
   padding: 6px 11px; border: 1px solid var(--line); border-radius: 5px;
   background: rgba(12,16,26,0.9); color: var(--ink);
   transition: border-color .15s, color .15s, transform .05s;
@@ -139,13 +165,16 @@ html, body {
 .floor-hint {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
   z-index: 18; pointer-events: none; white-space: nowrap;
-  font-size: 14px; color: var(--muted); letter-spacing: 0.5px;
+  font-size: var(--t-sub); color: var(--muted); letter-spacing: 0.5px;
   background: rgba(8,11,18,0.6); padding: 4px 12px; border-radius: 20px;
   animation: hintfade 1.2s ease 6s forwards;
 }
 @keyframes hintfade { to { opacity: 0; visibility: hidden; } }
 
-/* ---- in-world name tags (scale with the floor; can never overlap) ---- */
+/* ---- in-world name tags (scale with the floor; can never overlap) ----
+   These ride inside the floor's scaled label layer, so their px values are in
+   BUFFER units (multiplied by the zoom) — they are deliberately NOT on the
+   screen-space type scale above. Leave them be. */
 .tag {
   position: absolute; transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: 4px;
@@ -179,11 +208,11 @@ html, body {
 }
 .info-card.below { transform: translate(-50%, 0); margin-top: 8px; }
 .ic-head { display: flex; align-items: center; gap: 6px; }
-.ic-name { font-size: 18px; color: var(--gold); line-height: 1; }
-.ic-tier { font-family: var(--pixel); font-size: 7px; letter-spacing: 1px; text-transform: uppercase; margin-left: auto; }
+.ic-name { font-size: var(--t-val); color: var(--gold); line-height: 1; }
+.ic-tier { font-family: var(--pixel); font-size: var(--p-chip); letter-spacing: 1px; text-transform: uppercase; margin-left: auto; }
 /* role tags in the card head: PM gold, teammate cyan */
 .ic-lead, .ic-teammate {
-  font-family: var(--pixel); font-size: 6px; line-height: 1; letter-spacing: 1px;
+  font-family: var(--pixel); font-size: var(--p-chip); line-height: 1; letter-spacing: 1px;
   border-radius: 2px; padding: 2px 3px;
 }
 .ic-lead { color: #2a1f05; background: var(--gold); }
@@ -191,14 +220,14 @@ html, body {
 /* push the model tier to the far right even with a role tag present */
 .ic-head .ic-lead, .ic-head .ic-teammate { margin-left: 4px; }
 .ic-head .ic-lead + .ic-tier, .ic-head .ic-teammate + .ic-tier { margin-left: 6px; }
-.ic-sub { font-size: 14px; color: var(--muted); margin-top: 3px; }
+.ic-sub { font-size: var(--t-sub); color: var(--muted); margin-top: 3px; }
 .ic-sub .ic-dept { color: var(--cyan); }
-.ic-status { font-size: 14px; margin-top: 4px; color: var(--ink); }
+.ic-status { font-size: var(--t-sub); margin-top: 4px; color: var(--ink); }
 .ic-status.working { color: var(--green); }
 .ic-status.shell { color: #ffb454; }
 .ic-status.done { color: var(--cyan); }
 .ic-task { color: var(--gold); font-style: italic; }
-.ic-foot { font-size: 13px; color: var(--muted2); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
+.ic-foot { font-size: var(--t-fine); color: var(--muted2); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
 .ic-foot .ic-sub-badge { color: #46d6cf; }
 .ic-foot .ic-oc { color: #ff9f43; }
 .ic-foot .ic-codex { color: #ff8a3d; }
@@ -207,7 +236,7 @@ html, body {
 .empty-banner {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   background: rgba(8,11,18,0.95); border: 1px dashed var(--line);
-  padding: 14px 20px; border-radius: 6px; font-size: 19px; color: var(--muted);
+  padding: 14px 20px; border-radius: 6px; font-size: var(--t-val); color: var(--muted);
 }
 .empty-banner code { color: var(--green); background: #0c1119; padding: 1px 6px; border-radius: 3px; }
 .hidden { display: none; }
@@ -243,7 +272,7 @@ html, body {
   position: absolute; top: 50%; right: 0; transform: translateY(-50%);
   z-index: 25; cursor: pointer; display: none;
   align-items: center; justify-content: center;
-  width: 22px; height: 66px; font-size: 15px;
+  width: 22px; height: 66px; font-size: var(--t-sub);
   background: rgba(12,16,26,0.92); color: var(--cyan);
   border: 1px solid var(--line); border-right: none;
   border-radius: 6px 0 0 6px; box-shadow: -6px 0 18px rgba(0,0,0,0.45);
@@ -265,7 +294,7 @@ html, body {
 .card-fold > summary::-webkit-details-marker { display: none; }
 .card-fold > summary::after {
   content: '▸'; position: absolute; right: 14px; top: 50%;
-  transform: translateY(-50%); color: var(--muted); font-size: 12px;
+  transform: translateY(-50%); color: var(--muted); font-size: var(--t-sub);
   transition: transform .15s;
 }
 .card-fold[open] > summary::after { transform: translateY(-50%) rotate(90deg); }
@@ -274,11 +303,11 @@ html, body {
 /* the folded body gets its own padding (summary already has 14px top) */
 .card-fold > :not(summary) { margin-left: 14px; margin-right: 14px; }
 .card-fold > :last-child { margin-bottom: 14px; }
-/* card titles keep Press Start 2P (the headline accent) but at a slightly bigger
-   size + brighter ink so they read at a glance instead of straining the eye. */
-.card-title { font-family: var(--pixel); font-size: 10px; line-height: 1.4; letter-spacing: 1px; color: var(--cyan); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.card-title-hint { font-family: var(--term); font-size: 15px; color: var(--muted); letter-spacing: 0; text-transform: none; }
-.card-note { font-size: 14px; color: var(--muted); margin-top: 2px; }
+/* card titles keep Press Start 2P (the headline accent) but bright ink + spacing
+   so they read at a glance instead of straining the eye. */
+.card-title { font-family: var(--pixel); font-size: var(--p-cap); line-height: 1.4; letter-spacing: 1px; color: var(--cyan); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.card-title-hint { font-family: var(--term); font-size: var(--t-sub); color: var(--muted); letter-spacing: 0; text-transform: none; }
+.card-note { font-size: var(--t-sub); color: var(--muted); margin-top: 2px; }
 
 /* ---- sidebar Now | Analytics view toggle ---- */
 .view-toggle {
@@ -287,7 +316,7 @@ html, body {
 }
 .vt-btn {
   flex: 1 1 0; cursor: pointer; padding: 8px 6px;
-  font-family: var(--pixel); font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  font-family: var(--pixel); font-size: var(--p-cap); letter-spacing: 1px; text-transform: uppercase;
   color: var(--muted); background: transparent; border: none; border-radius: 5px;
   transition: color .15s, background .15s, box-shadow .15s;
 }
@@ -301,13 +330,13 @@ html, body {
 
 /* ---- "Now" view cards ---- */
 .now-card { background: linear-gradient(180deg, #102016, #0c1410); border-color: #1d5a3a; }
-.now-card #nowBurn { color: #fff; text-shadow: 0 0 18px rgba(57,217,138,0.55); }
+.now-card #nowBurn { font-size: var(--t-hero); line-height: 0.95; color: #fff; text-shadow: 0 0 18px rgba(57,217,138,0.55); }
 .now-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; }
 .now-stat { text-align: center; }
-.now-k { font-size: 30px; line-height: 1; color: var(--green); }
+.now-k { font-size: var(--t-big); line-height: 1; color: var(--green); }
 .now-stat:nth-child(2) .now-k { color: #ffb454; }
 .now-stat:nth-child(3) .now-k { color: var(--muted); }
-.now-l { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.1; }
+.now-l { font-size: var(--t-fine); color: var(--muted); margin-top: 3px; line-height: 1.1; }
 .now-bar {
   display: flex; height: 10px; margin-top: 12px; border-radius: 5px; overflow: hidden;
   background: #0c1119; border: 1px solid var(--line2);
@@ -316,11 +345,11 @@ html, body {
 .now-seg-working { background: var(--green); }
 .now-seg-shell { background: #ffb454; }
 .now-seg-idle { background: #3a4358; }
-.now-foot { font-size: 14px; color: var(--muted); margin-top: 8px; }
+.now-foot { font-size: var(--t-sub); color: var(--muted); margin-top: 8px; }
 
 /* recent tool calls (Now view) */
 .nowtoollist { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-.nowtool-head { display: flex; justify-content: space-between; font-size: 17px; }
+.nowtool-head { display: flex; justify-content: space-between; font-size: var(--t-body); }
 .nowtool-name { color: var(--ink); }
 .nowtool-val { color: var(--gold); }
 .nowtool-bar { height: 7px; background: #0c1119; border-radius: 4px; overflow: hidden; margin-top: 3px; border: 1px solid var(--line2); }
@@ -329,8 +358,8 @@ html, body {
 /* headcount card */
 .headcount-card { background: linear-gradient(180deg, #16213a, #101627); border-color: #25406b; }
 .bignum { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
-#hcNum { font-size: 64px; line-height: 0.9; color: #fff; text-shadow: 0 0 18px rgba(92,208,255,0.55); }
-.bignum-unit { font-family: var(--pixel); font-size: 9px; color: var(--cyan); }
+#hcNum { font-size: var(--t-hero); line-height: 0.9; color: #fff; text-shadow: 0 0 18px rgba(92,208,255,0.55); }
+.bignum-unit { font-family: var(--pixel); font-size: var(--p-cap); color: var(--cyan); }
 /* live payroll-equivalent meter (odometer) */
 .payroll-meter {
   margin-top: 12px; padding: 10px 12px;
@@ -339,30 +368,30 @@ html, body {
   box-shadow: inset 0 0 18px rgba(255,209,102,0.08);
 }
 .pm-label {
-  font-family: var(--pixel); font-size: 8px; line-height: 1.5; letter-spacing: 1px;
+  font-family: var(--pixel); font-size: var(--p-chip); line-height: 1.5; letter-spacing: 1px;
   color: var(--gold); text-transform: uppercase;
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
 }
-.pm-rate { font-family: var(--term); font-size: 16px; letter-spacing: 0; text-transform: none; color: var(--green); }
+.pm-rate { font-family: var(--term); font-size: var(--t-sub); letter-spacing: 0; text-transform: none; color: var(--green); }
 .pm-value {
-  margin-top: 6px; font-family: var(--term); font-size: 42px; line-height: 0.95;
+  margin-top: 6px; font-family: var(--term); font-size: var(--t-hero); line-height: 0.95;
   color: var(--gold); letter-spacing: 1px;
   text-shadow: 0 0 14px rgba(255,209,102,0.5), 1px 1px 0 #5a4410;
   font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
 }
-.pm-cents { font-size: 24px; color: #b9923a; }
+.pm-cents { font-size: var(--t-h); color: #b9923a; }
 
 .heads { width: 100%; height: auto; image-rendering: pixelated; margin: 12px 0 6px; }
-.hc-compare { font-size: 18px; color: var(--ink); }
-.hc-compare b { color: var(--gold); font-size: 22px; }
-.hc-cap { font-size: 14px; color: var(--muted2); }
+.hc-compare { font-size: var(--t-body); color: var(--ink); }
+.hc-compare b { color: var(--gold); font-size: var(--t-h); }
+.hc-cap { font-size: var(--t-fine); color: var(--muted2); }
 .hc-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; border-top: 1px solid var(--line2); padding-top: 10px; }
-.hc-k { font-size: 24px; color: var(--green); }
-.hc-l { font-size: 13px; color: var(--muted); line-height: 1.1; }
+.hc-k { font-size: var(--t-h); color: var(--green); }
+.hc-l { font-size: var(--t-fine); color: var(--muted); line-height: 1.1; }
 
 /* sliders */
 .slider { margin-top: 12px; }
-.slider label { display: flex; justify-content: space-between; font-size: 16px; color: var(--muted); }
+.slider label { display: flex; justify-content: space-between; font-size: var(--t-sub); color: var(--muted); }
 .slider label b { color: var(--ink); }
 .slider input[type=range] { width: 100%; margin-top: 5px; accent-color: var(--green); height: 4px; }
 
@@ -370,31 +399,31 @@ html, body {
 .modelbar { display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-top: 10px; background: #0c1119; border: 1px solid var(--line2); }
 .modelbar .seg { height: 100%; }
 .legend { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: var(--t-body); }
 .swatch { width: 11px; height: 11px; border-radius: 2px; flex: 0 0 auto; }
 .lg-name { color: var(--ink); flex: 1 1 auto; }
 .lg-val { color: var(--muted); }
 
 /* departments */
 .deptlist { display: flex; flex-direction: column; gap: 11px; margin-top: 10px; }
-.dept-head { display: flex; justify-content: space-between; font-size: 17px; }
+.dept-head { display: flex; justify-content: space-between; font-size: var(--t-body); }
 .dept-name { color: var(--ink); }
 .dept-val { color: var(--gold); }
 .dept-bar { height: 7px; background: #0c1119; border-radius: 4px; overflow: hidden; margin: 3px 0; border: 1px solid var(--line2); }
 .dept-fill { height: 100%; background: linear-gradient(90deg, #2d6fb0, #5cd0ff); }
-.dept-meta { font-size: 13px; color: var(--muted2); }
+.dept-meta { font-size: var(--t-fine); color: var(--muted2); }
 /* live "an agent is here now" dot before an active department's name */
-.dept-live { color: var(--green); font-size: 13px; margin-right: 5px; text-shadow: 0 0 6px var(--green); }
-.dept-more { font-size: 13px; color: var(--muted2); margin-top: 2px; }
-.dept-empty { font-size: 15px; color: var(--muted); }
-.dept-alltime { font-size: 12px; color: var(--muted2); font-style: italic; }
+.dept-live { color: var(--green); font-size: var(--t-fine); margin-right: 5px; text-shadow: 0 0 6px var(--green); }
+.dept-more { font-size: var(--t-fine); color: var(--muted2); margin-top: 2px; }
+.dept-empty { font-size: var(--t-sub); color: var(--muted); }
+.dept-alltime { font-size: var(--t-fine); color: var(--muted2); font-style: italic; }
 
 /* daily */
 .daily { width: 100%; display: block; margin-top: 8px; }
 
 /* ledger */
 .ledger { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.ledger-row { display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); border-bottom: 1px dotted var(--line2); padding-bottom: 3px; }
+.ledger-row { display: flex; justify-content: space-between; font-size: var(--t-body); color: var(--muted); border-bottom: 1px dotted var(--line2); padding-bottom: 3px; }
 .ledger-row b { color: var(--ink); }
 
 @media (max-width: 1000px) {

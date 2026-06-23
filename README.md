@@ -35,6 +35,9 @@ start typing, and uptimes tick live.
 - a glowing monitor colored by model (Opus = gold, Sonnet = cyan, Haiku = green),
 - a "typing" animation while `busy`, and a live uptime counter.
 
+Co-located agents (same project) cluster together on a shared **team rug**
+labeled with the repo name, so you read the floor as teams, not a scattered grid.
+
 **Effective team size** — your recent daily output tokens divided by what one
 human engineer would produce. Drag the **Assumptions** sliders (tokens per
 engineer-hour, hours/day, days/year, salary) to re-rate everything instantly:
@@ -48,36 +51,14 @@ engineer-hour, hours/day, days/year, salary) to re-rate everything instantly:
 30-day daily-output chart, and an all-time ledger (tokens, tool actions,
 subagents hired, sessions, active days).
 
-## Hybrid view (`?render=hybrid`)
+## Walk the floor
 
-The default, no-flag view is the original **procedural** office described above.
-Open `http://localhost:4313/?render=hybrid` for an alternate **Neighborhoods**
-office rebuilt from a real pixel-art sheet at a uniform 1× scale:
-
-- **Sheet workers** — instead of procedural bodies, each agent is one of the five
-  front-facing standing characters from the CC0 "PixelOffice" pack, standing
-  behind a real grey **counter** with the side-view **monitor** sprite on top.
-  The monitor's screen is tinted by model tier (Opus gold, Sonnet cyan, Haiku
-  green, Codex orange) and brightened/dimmed by activity (working / shell / idle).
-- **Team rugs** — co-located agents (same `project` / `cwd`) are grouped into
-  **neighborhood pods** that share one counter on a translucent team **rug**,
-  labeled with the repo name. Solo agents get their own small team area. So you
-  read the floor as teams, not a scattered grid.
-- **Real sheet furniture & floor** — a blue brick sheet floor tile, plus lounge
-  couches, accent chairs, plants, and other props pulled from the sheet.
-- Status indicators stay procedural and overlay the sheet art: the status **LED**,
-  the "needs you" bubble, the **lead crown**, and the subagent **minions**.
-
-**Walkable avatar** — press **`g`** (or click the walk-toggle button if present)
-to drop in a controllable **player character**. Drive it with **WASD / arrows**;
-the camera follows you. Walk up to a desk and that agent's chat surfaces in the
-peek panel (it reuses the same selection event a click does), so you can wander
-the floor and read what each agent is doing. Press `g` again to return to the
-free pan/zoom camera. (Hybrid only.)
-
-> The hybrid view is behind a flag while it's polished — see `BACKLOG.md` for the
-> plan to make it the default and the pending "lived-in decor" / animated-character
-> work.
+Press **`g`** (or click the walk button) to drop in a controllable **player
+character**. Drive it with **WASD / arrows**; the camera follows you. Walk up to
+a desk and that agent's chat surfaces in the peek panel (it reuses the same
+selection event a click does), so you can wander the floor and read what each
+agent is doing. Press `g` again to return to free pan/zoom. A cat roams the
+lounge for company.
 
 ## How it works
 
@@ -91,11 +72,9 @@ Zero dependencies — just Node's `http` + `fs` and a vanilla-JS canvas frontend
 | `lib/opencode.js` | reads opencode SQLite DB for live sessions + usage stats |
 | `lib/codex.js` | reads Codex local state for live sessions + usage stats |
 | `lib/roster.js` | stable name/title/palette per session (persisted) |
-| `public/render.js` | the pixel office: layout, animation, name plates, hybrid Neighborhoods floor |
-| `public/sprites.js` | procedural pixel-art drawing |
-| `public/office-atlas.js` | curated CC0 "PixelOffice" sheet + named sprite rects (hybrid) |
-| `public/characters.js` | static + animated character drawing (hybrid worker layer) |
-| `public/avatar.js` | the walkable user avatar (`g` to toggle, WASD/arrows to move) |
+| `public/office.js` | the pixel office: project desk clusters, team rugs, decor, camera, animation |
+| `public/sprites.js` | procedural pixel-art drawing (every glyph; no sprite sheet) |
+| `public/avatar.js` | the walkable user avatar + wandering cat (`g` to toggle, WASD/arrows) |
 | `public/app.js` | data polling, manpower math, panels, ticker |
 
 Usage stats are cached in `data/usage-cache.json` and `data/opencode-usage-cache.json`

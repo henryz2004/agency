@@ -31,7 +31,7 @@ let cells = [];      // {x, y, agent} — flattened, in draw order
 let avatar = null;                  // the player (created in initOffice, off by default)
 let lastT = 0;                      // last loop timestamp → real dt for motion
 let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built in JS)
-const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false }; // roaming pet
+const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1 }; // roaming pet (dir: +1 faces right)
 
 // DOM overlay layer: real (crisp) HTML text for the name chips + repo labels,
 // instead of canvas pixel text. One wrapper div over the canvas, scaled by
@@ -323,8 +323,13 @@ function drawKitchen(z) {
   px(ctx, vx + 12, y + 4, 3, 6, '#0d1018'); // dispense slot
 }
 
-function drawCat(x, y, frame) {
+function drawCat(x, y, frame, dir = 1) {
+  x = Math.round(x); y = Math.round(y);
   const tail = frame % 8 < 4 ? 0 : 1;
+  // The art faces right; mirror about the body centre (~x+5) to face left so the
+  // cat walks the way it's heading instead of moonwalking backwards.
+  const flip = dir < 0;
+  if (flip) { ctx.save(); ctx.translate((x + 5) * 2, 0); ctx.scale(-1, 1); }
   px(ctx, x, y - 6, 8, 6, '#23252c');   // body
   px(ctx, x + 6, y - 11, 6, 6, '#23252c'); // head
   px(ctx, x + 6, y - 13, 2, 3, '#23252c'); // ears
@@ -333,6 +338,7 @@ function drawCat(x, y, frame) {
   px(ctx, x + 10, y - 9, 1, 1, '#6cff9a');
   px(ctx, x - 2, y - 8 - tail, 2, 6, '#23252c'); // tail
   px(ctx, x + 1, y, 1, 1, '#23252c'); px(ctx, x + 5, y, 1, 1, '#23252c'); // paws
+  if (flip) ctx.restore();
 }
 
 function drawDog(x, y) {
@@ -412,13 +418,16 @@ function drawClusterRugs() {
 // overlays the canvas exactly. Inline styles only — we don't own index.html/css.
 function ensureLabelWrap() {
   if (labelWrap || !canvas || !canvas.parentElement) return;
-  // inject the unread-pip pulse keyframe once (scoped <style>; we don't own css)
+  // inject the "just finished / unread" glow keyframe once (scoped <style>; we
+  // don't own css). A calm CYAN breathe on the whole name chip — matches the
+  // topbar's cyan "new for you" language and the wave the worker does; replaces
+  // the old hot-magenta corner pip.
   if (!document.getElementById('proc-kf')) {
     const s = document.createElement('style');
     s.id = 'proc-kf';
     s.textContent =
-      '@keyframes procUnreadPulse{0%,100%{box-shadow:0 0 3px 1px rgba(255,92,186,0.9);transform:scale(1)}' +
-      '50%{box-shadow:0 0 11px 4px rgba(255,92,186,0.95);transform:scale(1.32)}}';
+      '@keyframes procUnreadGlow{0%,100%{box-shadow:0 0 4px 1px rgba(92,208,255,0.5)}' +
+      '50%{box-shadow:0 0 10px 3px rgba(92,208,255,0.85)}}';
     document.head.appendChild(s);
   }
   labelWrap = document.createElement('div');
@@ -467,16 +476,9 @@ function syncLabels() {
       name.style.cssText =
         `font:${NAME_FONT};color:#eef3fb;line-height:1;` +
         'overflow:hidden;text-overflow:ellipsis;';
-      // "just finished / unread" pip — a distinct PINK notification dot at the
-      // chip's top-right corner, deliberately set apart from the activity LED
-      // (green/amber/grey) on the chip's left, so the two never read as the same.
-      const pip = document.createElement('span');
-      pip.dataset.role = 'pip';
-      pip.style.cssText =
-        'position:absolute;top:-5px;right:-5px;width:9px;height:9px;border-radius:50%;' +
-        'background:#ff5cba;border:1px solid #fff0fa;' +
-        'animation:procUnreadPulse 1.15s ease-in-out infinite;display:none;';
-      el.appendChild(dot); el.appendChild(name); el.appendChild(pip);
+      // "just finished / unread" is shown as a cyan glow on the whole chip (see
+      // syncLabels below) + a wave from the worker — no separate corner badge.
+      el.appendChild(dot); el.appendChild(name);
       labelWrap.appendChild(el);
       nameNodes[i] = el;
     }
@@ -484,14 +486,16 @@ function syncLabels() {
     // pin the chip just under the desk content, centred on the cell
     el.style.left = (cell.x + CELL_W / 2) + 'px';
     el.style.top = (cell.y + CELL_H - 10) + 'px';
-    const dot = el.firstChild, name = el.children[1], pip = el.children[2];
+    const dot = el.firstChild, name = el.children[1];
     const col = statusColor(a.activity);
     dot.style.background = col;
     dot.style.boxShadow = a.activity === 'idle' ? 'none' : `0 0 4px ${col}`;
     name.textContent = first;
-    // unread pip: agent just finished + not yet viewed (app.js owns the set)
+    // unread = agent just finished + not yet viewed (app.js owns the set). Shown
+    // as a cyan glow on the chip (the worker also waves, see drawCubicle/unread).
     const unread = !!(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
-    pip.style.display = unread ? 'block' : 'none';
+    el.style.borderColor = unread ? 'rgba(92,208,255,0.85)' : 'rgba(255,255,255,0.18)';
+    el.style.animation = unread ? 'procUnreadGlow 1.8s ease-in-out infinite' : 'none';
   });
   for (let i = cells.length; i < nameNodes.length; i++) nameNodes[i].style.display = 'none';
 
@@ -500,12 +504,13 @@ function syncLabels() {
     let el = repoNodes[i];
     if (!el) {
       el = document.createElement('div');
-      // "Sewn into the carpet": no chip background — cream thread-colored caps
-      // with an embossed/stitched shadow + wide letter-spacing, sitting on the
-      // rug's top strip so the team name reads as woven into the fabric.
+      // "Sewn into the carpet": no chip background — cream thread-colored text
+      // with an embossed/stitched shadow, sitting on the rug's top strip so the
+      // team name reads as woven into the fabric. Lowercase + a trailing slash so
+      // it reads plainly as the folder (not a shouty all-caps header).
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:600 9px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.8px;" +
+        "font:600 8px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
         'color:#f3ead2;text-align:center;' +
         'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
@@ -519,7 +524,8 @@ function syncLabels() {
     el.style.maxWidth = (c.w + CLUSTER_GAP_X) + 'px';
     el.style.left = (c.x + c.w / 2) + 'px';
     el.style.top = (c.y + 2) + 'px'; // on the rug's top strip
-    el.textContent = String(c.project || '').toUpperCase();
+    const proj = String(c.project || '');
+    el.textContent = proj ? proj + '/' : '';
   });
   for (let i = clusters.length; i < repoNodes.length; i++) repoNodes[i].style.display = 'none';
 
@@ -628,7 +634,9 @@ function applyCam() {
     labelWrap.style.transformOrigin = '0 0';
     labelWrap.style.transform = `scale(${eff})`;
   }
-  if (world) world.style.transform = `translate(${Math.round(cam.x)}px, ${Math.round(cam.y)}px)`;
+  // translate3d (not translate) forces a GPU compositor layer so the camera
+  // follow glides; rounding keeps the pixel art crisp under the 3x CSS upscale.
+  if (world) world.style.transform = `translate3d(${Math.round(cam.x)}px, ${Math.round(cam.y)}px, 0)`;
   // CSS hides #recenter until .show; reveal it once the user has panned/zoomed
   // so the affordance isn't permanently invisible.
   if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
@@ -831,15 +839,18 @@ function floorBounds() {
 
 // Center the camera on the avatar (lerped catch-up) so it follows while walking.
 // Mutates cam WITHOUT setting userMoved, so toggling walk off restores fit/pan.
-function followAvatar() {
+function followAvatar(dt = 16) {
   if (!avatar) return;
   const vp = viewportRect();
   const availW = Math.max(40, vp.width - reservedRight);
   const eff = UPSCALE * cam.s;
   const tx = availW / 2 - avatar.pos.x * eff;
   const ty = vp.height / 2 - avatar.pos.y * eff;
-  cam.x += (tx - cam.x) * 0.18;
-  cam.y += (ty - cam.y) * 0.18;
+  // Frame-rate-independent catch-up (~0.18 per frame at 60fps) so the follow
+  // feels identical at 30 / 60 / 120 Hz instead of speeding up with frame rate.
+  const k = 1 - Math.pow(0.82, dt / 16.67);
+  cam.x += (tx - cam.x) * k;
+  cam.y += (ty - cam.y) * k;
   clampPan();
   applyCam();
 }
@@ -924,6 +935,9 @@ function updateCat(dt, now) {
     const dx = cat.tx - cat.x, dy = cat.ty - cat.y, d = Math.hypot(dx, dy);
     if (d > 1.2) {
       const step = Math.min(14 * dt / 1000, d); // ~14 buffer px/s amble
+      // Face the direction of travel so it never moonwalks (deadzone avoids
+      // flicker on near-vertical paths; keeps the last facing otherwise).
+      if (dx < -0.4) cat.dir = -1; else if (dx > 0.4) cat.dir = 1;
       cat.x += (dx / d) * step; cat.y += (dy / d) * step;
     } else { cat.sit = true; cat.until = now + 1500 + Math.random() * 3000; }
   }
@@ -946,7 +960,9 @@ function draw() {
     const k = keyOf(a);
     const selected = k != null && k === selectedKey;
     const hovered = k != null && k === hoverKey && !selected;
-    drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered);
+    // just-finished + unviewed → the worker waves to catch your eye (app.js owns the set)
+    const unread = !!(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
+    drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread);
     if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
   }
   // "Waiting on you" — highest-signal state, painted LAST so it floats above every
@@ -957,7 +973,7 @@ function draw() {
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
   // Floor entities last, so the roaming pet + the player float above the desks.
-  if (cat.init) drawCat(cat.x, cat.y, frame);
+  if (cat.init) drawCat(cat.x, cat.y, frame, cat.dir);
   if (avatar && avatar.enabled) avatar.draw(ctx);
 }
 
@@ -1040,21 +1056,33 @@ export function setAgents(next) {
 
 let raf, timer;
 function loop() {
-  frame++;
+  if (!started) return;              // cancelled (reset) between frames
   const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  // Animation phase is derived from wall-clock at a FIXED ~7.5fps cadence, NOT
+  // incremented per loop — so sprites animate at the same speed regardless of the
+  // loop rate. (Walk mode runs the loop at native refresh for smooth avatar/camera
+  // motion; without this, every typing/blink/tail-wag cycle would run ~8x faster.)
+  frame = Math.floor(now / 130);
   const dt = lastT ? Math.min(now - lastT, 100) : 16; // clamp big tab-out gaps
   lastT = now;
   updateCat(dt, now);                // ambient — roams whether or not walk mode is on
-  if (avatar && avatar.enabled) {
+  const walking = !!(avatar && avatar.enabled);
+  if (walking) {
     avatar.update(dt, { podPositions: buildPods(), bounds: floorBounds() });
-    followAvatar();
+    followAvatar(dt);
   }
   draw();
-  raf = requestAnimationFrame(() => {
-    if (!started) return;            // cancelled (reset) while the RAF was pending
-    // Smooth (~30fps) while the player is walking; the calm ~7.5fps pixel cadence otherwise.
-    timer = setTimeout(loop, (avatar && avatar.enabled) ? 33 : 130);
-  });
+  // Walking: glide at the display's native refresh — no setTimeout throttle, so
+  // motion is smooth and frame-aligned (the old ~30fps setTimeout-in-rAF was the
+  // choppiness). Idle: the calm ~7.5fps pixel cadence (cheap + the retro tick).
+  if (walking) {
+    raf = requestAnimationFrame(loop);
+  } else {
+    raf = requestAnimationFrame(() => {
+      if (!started) return;          // cancelled (reset) while the RAF was pending
+      timer = setTimeout(loop, 130);
+    });
+  }
 }
 
 export function reset(n, seed) {

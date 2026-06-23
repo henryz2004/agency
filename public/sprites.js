@@ -277,7 +277,7 @@ export function drawDaylight(ctx, bufW, top, bufH, mood = MOODS.day) {
 // working. Drawn so the head clears the cubicle divider and the body sits behind
 // the desk. (cx, seatY) = centre-x, the chair seat line.
 export function drawPerson(ctx, cx, headTopY, opts) {
-  const { seed = 1, activity = 'idle', frame = 0 } = opts;
+  const { seed = 1, activity = 'idle', frame = 0, unread = false } = opts;
   const vr = rng(seed * 2654435761 + 7);
   const skin = SKINS[Math.floor(vr() * SKINS.length)];
   const hair = HAIRS[Math.floor(vr() * HAIRS.length)];
@@ -289,7 +289,10 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   const typing = activity === 'working';
   const shellRunning = activity === 'shell';
   const fp = frame + (seed % 6);
-  const breath = !typing && fp % 8 < 4 ? 1 : 0;
+  // Settled-idle workers stand perfectly still (no bob). A shell-running agent —
+  // and a FRESHLY-idle UNREAD one (it also waves) — gets the subtle breath bob;
+  // a working agent's life comes from its typing hands instead.
+  const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
   const hy = headTopY - breath;
   const blink = (frame + (seed % 11)) % 13 === 0;
 
@@ -340,13 +343,25 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   px(ctx, cx - 7, ty + 3, 15, 9, shirt);
   px(ctx, cx + 4, ty, 4, 12, shade(shirt, -26)); // right-side shade
   px(ctx, cx - 1, ty, 2, 12, shade(shirt, 18));  // collar/placket
-  // arms to the desk; hands bob while typing
-  const lh = typing && frame % 2 ? 1 : 0;
-  const rh = typing && frame % 2 ? 0 : 1;
-  px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
-  px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
-  px(ctx, cx - 9, ty + 11 + (typing ? lh : 0), 3, 2, skin); // hands
-  px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
+  // arms. A just-finished UNREAD worker raises its right arm and waves to catch
+  // your eye (left arm stays at the desk); reads as "I'm done, come look" — and
+  // pops against the now-still idle pose. Otherwise: arms to the desk, hands
+  // bobbing while typing.
+  if (unread && !typing && !shellRunning) {
+    const wig = frame % 4 < 2 ? 0 : 2; // slow side-to-side hand wiggle (~2 Hz)
+    px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));  // left arm down
+    px(ctx, cx - 9, ty + 11, 3, 2, skin);              // left hand at desk
+    px(ctx, cx + 7, ty, 3, 5, shade(shirt, -12));      // right upper arm, raised
+    px(ctx, cx + 9, ty - 5, 2, 6, shade(shirt, -12));  // right forearm up
+    px(ctx, cx + 8 + wig, ty - 9, 3, 3, skin);         // waving hand
+  } else {
+    const lh = typing && frame % 2 ? 1 : 0;
+    const rh = typing && frame % 2 ? 0 : 1;
+    px(ctx, cx - 9, ty + 3, 3, 8, shade(shirt, -12));
+    px(ctx, cx + 7, ty + 3, 3, 8, shade(shirt, -12));
+    px(ctx, cx - 9, ty + 11 + (typing ? lh : 0), 3, 2, skin); // hands
+    px(ctx, cx + 7, ty + 11 + (typing ? rh : 0), 3, 2, skin);
+  }
 }
 
 // ---- a desk workstation ----------------------------------------------------
@@ -361,21 +376,22 @@ export const CELL_H = 78;
 const DESK_TOP = 52;   // desk surface y within the cell
 const DIV_W = 4;       // legacy inset used to position desk props/flag
 
-export function drawCubicle(ctx, x, y, agent, frame, selected, hovered) {
+export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread = false) {
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
   // A "waiting on you" agent is usually idle, but it must POP (not recede), so it
-  // is exempt from the idle desaturation — the amber desk treatment marks it.
+  // is exempt from the idle desaturation — the amber desk treatment marks it. A
+  // just-finished UNREAD agent is likewise kept full-color so its wave reads.
   const needsYou = !!(agent.needsYou || agent.awaitingReply);
-  const idle = agent.activity === 'idle' && !needsYou;
+  const idle = agent.activity === 'idle' && !needsYou && !unread;
 
   // --- the seated worker + their personal props --- idle reads as a powered-down
   // workstation: DESATURATE (grayscale + slight dim) rather than the old
   // translucency, which looked like a render glitch. Active desks stay full color
   // so they pop on a glance-scan.
   if (idle) ctx.filter = 'grayscale(1) brightness(0.82)';
-  drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame });
+  drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame, unread });
   // a pinned flag + sticky-note cluster (personalization) — muted too when idle
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
   drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
