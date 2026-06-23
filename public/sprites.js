@@ -425,24 +425,13 @@ export function drawCubicle(ctx, x, y, agent, frame, selected, hovered, unread =
   const tier = tierFor(agent.model);
   const seed = (agent.pid | 0) || hashInt(agent.sessionId || 'a');
   const cx = x + CELL_W / 2;
-  // A "waiting on you" agent is usually idle, but it must POP (not recede), so it
-  // is exempt from the idle desaturation — the amber desk treatment marks it. A
-  // just-finished UNREAD agent is likewise kept full-color so its wave reads.
-  const needsYou = !!(agent.needsYou || agent.awaitingReply);
-  const idle = agent.activity === 'idle' && !needsYou && !unread;
-
-  // --- the seated worker + their personal props --- idle reads as a powered-down
-  // workstation: DESATURATE (grayscale + slight dim) rather than the old
-  // translucency, which looked like a render glitch. Active desks stay full color
-  // so they pop on a glance-scan.
-  if (idle) ctx.filter = 'grayscale(1) brightness(0.82)';
-  // `away` (idle-wander): the worker has left its desk — draw the empty workstation
-  // (the standing/walking sprite is drawn at its floor position by office.js).
-  if (!away) drawPerson(ctx, cx - 6, y + DESK_TOP - 30, { seed, activity: agent.activity, frame, unread });
-  // a pinned flag + sticky-note cluster (personalization) — muted too when idle
+  // --- the seated worker + their personal props. Idle no longer desaturates: the
+  // OFF (dark) monitor + grey status dot already read as idle, so the worker keeps
+  // full color. `away` (idle-wander): worker has left its desk → draw it empty.
+  if (!away) drawPerson(ctx, cx - 6, y + DESK_TOP - 28, { seed, activity: agent.activity, frame, unread });
+  // a pinned flag + sticky-note cluster (personalization)
   drawPin(ctx, cx - 22, y + DESK_TOP - 20, seed);
   drawStickies(ctx, cx + 14, y + DESK_TOP - 20, seed);
-  if (idle) ctx.filter = 'none';
 
   // --- wood desk surface across the cell ---
   const dx = x + DIV_W, dw = CELL_W - DIV_W * 2;

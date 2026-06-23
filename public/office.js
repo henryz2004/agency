@@ -31,6 +31,8 @@ let cells = [];      // {x, y, agent} — flattened, in draw order
 let avatar = null;                  // the player (created in initOffice, off by default)
 let lastT = 0;                      // last loop timestamp → real dt for motion
 let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built in JS)
+let nameBtn = null;                  // on-screen nametag-visibility toggle
+let labelsHidden = false;            // hide all agent name chips when true ('n' / button)
 // roaming pet: dir +1 faces right; sit→sleep when it rests a while; `petted` is
 // set while the walking avatar is right next to it (→ wakes + hearts in drawCat).
 const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1, sleeping: false, petted: false };
@@ -491,7 +493,7 @@ function ensureLabelWrap() {
 
 // Floor label face: IBM Plex Mono (clean, readable mono) for names/teams, small —
 // the pixel identity lives in the art + Press Start 2P headers/numbers, not body text.
-const NAME_FONT = "9px 'IBM Plex Mono', ui-monospace, monospace";
+const NAME_FONT = "8px 'IBM Plex Mono', ui-monospace, monospace";
 const REPO_FONT = "9px 'IBM Plex Mono', ui-monospace, monospace";
 
 function statusColor(act) {
@@ -516,13 +518,13 @@ function syncLabels() {
       el = document.createElement('div');
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);display:inline-flex;' +
-        'align-items:center;gap:3px;max-width:80px;box-sizing:border-box;' +
-        'padding:0 4px 0 3px;height:11px;white-space:nowrap;' +
+        'align-items:center;gap:2px;max-width:66px;box-sizing:border-box;' +
+        'padding:0 3px 0 2px;height:9px;white-space:nowrap;' +
         'background:rgba(14,20,32,0.92);border:1px solid rgba(255,255,255,0.18);' +
-        'border-radius:4px;line-height:1;';
+        'border-radius:3px;line-height:1;';
       const dot = document.createElement('span');
       dot.dataset.role = 'dot';
-      dot.style.cssText = 'width:5px;height:5px;border-radius:50%;flex:0 0 auto;';
+      dot.style.cssText = 'width:4px;height:4px;border-radius:50%;flex:0 0 auto;';
       const name = document.createElement('span');
       name.dataset.role = 'name';
       name.style.cssText =
@@ -534,10 +536,13 @@ function syncLabels() {
       labelWrap.appendChild(el);
       nameNodes[i] = el;
     }
-    el.style.display = 'inline-flex';
-    // pin the chip just under the desk content, centred on the cell
-    el.style.left = (cell.x + CELL_W / 2) + 'px';
-    el.style.top = (cell.y + CELL_H - 10) + 'px';
+    el.style.display = labelsHidden ? 'none' : 'inline-flex';
+    // Pin the chip: FOLLOW a wandering worker, else sit under the desk. This
+    // per-poll pass uses the SAME rule as the per-frame draw(), so the chip never
+    // flickers back to the desk for a frame when a poll lands mid-stroll.
+    const w = wanderers.get(keyOf(a));
+    if (w && w.phase !== 'seated') { el.style.left = Math.round(w.x) + 'px'; el.style.top = Math.round(w.y - 40) + 'px'; }
+    else { el.style.left = (cell.x + CELL_W / 2) + 'px'; el.style.top = (cell.y + CELL_H - 10) + 'px'; }
     const dot = el.firstChild, name = el.children[1];
     const col = statusColor(a.activity);
     dot.style.background = col;
@@ -964,6 +969,19 @@ function updateWalkUI() {
   if (walkHint) walkHint.style.display = on ? 'block' : 'none';
 }
 
+// Toggle agent name-tag visibility (the 'n' key / the button). syncLabels + draw()
+// both honor `labelsHidden`; we flip the active chips here too for an instant response.
+function toggleLabels(on) {
+  labelsHidden = on == null ? !labelsHidden : !!on;
+  for (let i = 0; i < cells.length; i++) if (nameNodes[i]) nameNodes[i].style.display = labelsHidden ? 'none' : 'inline-flex';
+  updateLabelBtn();
+}
+function updateLabelBtn() {
+  if (!nameBtn) return;
+  nameBtn.textContent = labelsHidden ? '🏷 names off' : '🏷 names';
+  nameBtn.style.opacity = labelsHidden ? '0.6' : '1';
+}
+
 // Build the small walk affordances (a toggle button + a hint) over the floor
 // frame, styled inline (index.html / style.css aren't in this lane).
 function ensureWalkUI() {
@@ -980,6 +998,20 @@ function ensureWalkUI() {
   });
   walkBtn.addEventListener('click', () => toggleWalk());
   host.appendChild(walkBtn);
+  // nametag-visibility toggle (top-left, clear of the bottom controls)
+  nameBtn = document.createElement('button');
+  nameBtn.type = 'button';
+  nameBtn.id = 'nameToggle';
+  nameBtn.title = 'Show / hide agent name tags (N)';
+  Object.assign(nameBtn.style, {
+    position: 'absolute', left: '12px', top: '12px', zIndex: '6',
+    font: '11px ui-monospace, monospace', background: 'rgba(16,20,28,0.82)',
+    border: '1px solid rgba(255,255,255,0.14)', borderRadius: '6px',
+    padding: '5px 9px', cursor: 'pointer', color: '#cdd6e6',
+  });
+  nameBtn.addEventListener('click', () => toggleLabels());
+  host.appendChild(nameBtn);
+  updateLabelBtn();
   walkHint = document.createElement('div');
   Object.assign(walkHint.style, {
     position: 'absolute', left: '12px', bottom: '40px', zIndex: '6',
@@ -1048,10 +1080,11 @@ function updateCat(dt, now) {
   }
 }
 
-// Idle-wander: each settled-idle worker, on a relaxed timer, gets up and ambles to
-// a lounge spot, lingers, then returns to its desk. Runs every tick (ambient life).
-// At most a couple wander at once so the floor reads calm, not a parade.
-const WANDER_SPEED = 26; // buffer px / second amble
+// Idle-wander: each settled-idle worker, on a relaxed (and deliberately irregular)
+// timer, gets up and ambles to a lounge spot, lingers, sometimes drifts to another,
+// then heads home. Runs every tick (ambient life). At most a couple wander at once
+// so the floor reads calm, not a parade.
+const WANDER_SPEED = 24; // fallback amble speed (buffer px/s); each wanderer varies its own
 function updateWanderers(dt, now) {
   if (!cells.length) return;
   const live = new Set();
@@ -1065,45 +1098,75 @@ function updateWanderers(dt, now) {
     const homeX = cell.x + CELL_W / 2, homeY = cell.y + CELL_H - 6;
     let w = wanderers.get(key);
     if (!w) {
-      w = { phase: 'seated', x: homeX, y: homeY, tx: homeX, ty: homeY, until: now + 6000 + Math.random() * 20000, homeX, homeY };
+      w = { phase: 'seated', x: homeX, y: homeY, tx: homeX, ty: homeY, legDist: 1,
+            until: now + 9000 + Math.random() * 40000, homeX, homeY,
+            speed: 19 + Math.random() * 13 }; // its own amble speed → motion isn't uniform
       wanderers.set(key, w);
     } else { w.homeX = homeX; w.homeY = homeY; } // re-sync home to the (re-laid) desk
     const settled = a.activity === 'idle' && !a.needsYou && !a.awaitingReply
       && !(a.sessionId && window.agencyUnread && window.agencyUnread.has(a.sessionId));
     // started working / went needs-you while out → head home now
     if (!settled && w.phase !== 'seated' && w.phase !== 'returning') {
-      w.phase = 'returning'; w.tx = w.homeX; w.ty = w.homeY;
+      w.phase = 'returning'; setTarget(w, w.homeX, w.homeY);
     }
     switch (w.phase) {
       case 'seated':
         if (now >= w.until) {
-          if (settled && away < 2 && wanderAnchors.length) {
-            const d = wanderAnchors[Math.floor(Math.random() * wanderAnchors.length)];
-            w.x = w.homeX; w.y = w.homeY; w.tx = d.x; w.ty = d.y; w.phase = 'walking'; away++;
+          // Even when the timer fires, only SOMETIMES actually get up — keeps the
+          // rhythm irregular rather than a metronome; otherwise re-check later.
+          if (settled && away < 2 && wanderAnchors.length && Math.random() < 0.7) {
+            w.x = w.homeX; w.y = w.homeY; startStroll(w); away++;
           } else {
-            w.until = now + 8000 + Math.random() * 16000; // not now — check again later
+            w.until = now + 6000 + Math.random() * 22000;
           }
         }
         break;
       case 'walking':
-        if (stepToward(w, dt)) { w.phase = 'lingering'; w.until = now + 5000 + Math.random() * 7000; }
+        if (stepToward(w, dt)) { w.phase = 'lingering'; w.until = now + 4000 + Math.random() * 12000; }
         break;
       case 'lingering':
-        if (now >= w.until) { w.phase = 'returning'; w.tx = w.homeX; w.ty = w.homeY; }
+        if (now >= w.until) {
+          // sometimes drift to ANOTHER spot before heading home (not just out-and-back)
+          if (wanderAnchors.length > 1 && Math.random() < 0.35) startStroll(w);
+          else { w.phase = 'returning'; setTarget(w, w.homeX, w.homeY); }
+        }
         break;
       case 'returning':
-        if (stepToward(w, dt)) { w.phase = 'seated'; w.until = now + 12000 + Math.random() * 22000; }
+        if (stepToward(w, dt)) { w.phase = 'seated'; w.until = now + 11000 + Math.random() * 34000; }
         break;
     }
   });
   for (const k of wanderers.keys()) if (!live.has(k)) wanderers.delete(k); // agent left the floor
 }
 
-// Amble w toward (tx,ty) at WANDER_SPEED; returns true on arrival.
+// Aim w at (tx,ty), recording the leg distance so stepToward can ease in + out.
+function setTarget(w, tx, ty) {
+  w.tx = tx; w.ty = ty;
+  w.legDist = Math.max(1, Math.hypot(tx - w.x, ty - w.y));
+}
+
+// Pick a lounge anchor to amble to (avoiding the spot it's already standing on, so
+// a "second stop" actually moves it) and start walking.
+function startStroll(w) {
+  const n = wanderAnchors.length;
+  let d = wanderAnchors[Math.floor(Math.random() * n)];
+  if (n > 1 && Math.abs(d.x - w.x) < 3 && Math.abs(d.y - w.y) < 3) {
+    d = wanderAnchors[(wanderAnchors.indexOf(d) + 1) % n];
+  }
+  w.phase = 'walking';
+  setTarget(w, d.x, d.y);
+}
+
+// Amble w toward its target, easing IN at the start and OUT near arrival so it
+// accelerates and settles naturally instead of lurching at a constant speed.
 function stepToward(w, dt) {
   const dx = w.tx - w.x, dy = w.ty - w.y, d = Math.hypot(dx, dy);
   if (d <= 1.2) return true;
-  const step = Math.min(WANDER_SPEED * dt / 1000, d);
+  const traveled = w.legDist - d;
+  const easeIn = Math.min(1, traveled / 12 + 0.5); // ramp up over the first ~12px
+  const easeOut = Math.min(1, d / 16);             // ramp down within ~16px of arrival
+  const ease = Math.max(0.4, Math.min(easeIn, easeOut));
+  const step = Math.min((w.speed || WANDER_SPEED) * ease * dt / 1000, d);
   w.x += (dx / d) * step; w.y += (dy / d) * step;
   return false;
 }
@@ -1143,9 +1206,12 @@ function draw() {
     }
     // the name chip follows a wandering worker; otherwise it sits under the desk
     const node = nameNodes[i];
-    if (node && node.style.display !== 'none') {
-      if (away) { node.style.left = Math.round(w.x) + 'px'; node.style.top = Math.round(w.y - 40) + 'px'; }
-      else { node.style.left = (cell.x + CELL_W / 2) + 'px'; node.style.top = (cell.y + CELL_H - 10) + 'px'; }
+    if (node) {
+      node.style.display = labelsHidden ? 'none' : 'inline-flex';
+      if (!labelsHidden) {
+        if (away) { node.style.left = Math.round(w.x) + 'px'; node.style.top = Math.round(w.y - 40) + 'px'; }
+        else { node.style.left = (cell.x + CELL_W / 2) + 'px'; node.style.top = (cell.y + CELL_H - 10) + 'px'; }
+      }
     }
   });
   if (avatar && avatar.enabled) actors.push({ y: avatar.pos.y, fn: () => avatar.draw(ctx) });
@@ -1186,10 +1252,12 @@ export function initOffice(canvasEl, _labels) {
   avatar = createAvatar({ enabled: false });
   ensureWalkUI();
   window.addEventListener('keydown', (e) => {
-    if (e.key !== 'g' && e.key !== 'G') return;
-    const t = e.target; // don't toggle while typing in the chat panel
+    const k = e.key.toLowerCase();
+    if (k !== 'g' && k !== 'n') return;
+    const t = e.target; // don't fire while typing in the chat panel
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-    toggleWalk();
+    if (k === 'g') toggleWalk();
+    else toggleLabels();
   });
 }
 
