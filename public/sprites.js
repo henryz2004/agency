@@ -335,12 +335,12 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   const typing = activity === 'working';
   const shellRunning = activity === 'shell';
   const fp = frame + (seed % 6);
-  // Vertical body bob: a WORKING agent bobs on the (fast) typing cadence so it
-  // visibly reads as busy; a shell-running / freshly-idle-unread one "breathes"
-  // slowly; a settled-idle worker stands perfectly still.
-  const bob = typing ? (frame % 4 < 2 ? 1 : 0)
-            : (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
-  const hy = headTopY - bob;
+  // Vertical body bob. A WORKING agent DIPS DOWN on the typing cadence (leaning
+  // into the work) so it never rises above the desk line; a shell-running /
+  // freshly-idle-unread one "breathes" slowly upward; settled-idle stands still.
+  const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
+  const typeBob = typing && frame % 4 < 2 ? 1 : 0; // dips DOWN, not up
+  const hy = headTopY - breath + typeBob;
   const blink = (frame + (seed % 11)) % 13 === 0;
   const fy = hy + 4;
 
@@ -350,7 +350,7 @@ export function drawPerson(ctx, cx, headTopY, opts) {
   // --- torso (shirt) --- slimmed so the worker reads as a compact little person
   // rather than a wide block: shoulders taper from the neck, body ~13 wide (was
   // 15) and a touch shorter. (The desk hides the lower half on a seated worker.)
-  const ty = fy + 12 - bob;
+  const ty = fy + 12; // carries the breath/typeBob shift via hy
   px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders (tapered in)
   px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
   px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26)); // right-side shade
@@ -372,9 +372,9 @@ export function drawPerson(ctx, cx, headTopY, opts) {
     const lh = typing && frame % 2 ? 2 : 0;
     const rh = typing && frame % 2 ? 0 : 2;
     px(ctx, cx - 8, ty + 3, 2, 7 - lh, shade(shirt, -12)); // left arm (raises with its hand)
-    px(ctx, cx + 6, ty + 3, 2, 7 - rh, shade(shirt, -12)); // right arm
+    px(ctx, cx + 7, ty + 3, 2, 7 - rh, shade(shirt, -12)); // right arm (mirror of the left about cx)
     px(ctx, cx - 8, ty + 10 - lh, 2, 2, skin);             // left hand (lifts UP, stays above the desk)
-    px(ctx, cx + 6, ty + 10 - rh, 2, 2, skin);             // right hand
+    px(ctx, cx + 7, ty + 10 - rh, 2, 2, skin);             // right hand
   }
 }
 
@@ -398,11 +398,11 @@ export function drawWalker(ctx, cx, feetY, opts = {}) {
   px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
   px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26));
   px(ctx, cx - 1, ty, 2, 11, shade(shirt, 18));
-  // arms hanging at the sides (thinner)
+  // arms hanging at the sides (thinner, mirrored about cx)
   px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12));
-  px(ctx, cx + 6, ty + 3, 2, 7, shade(shirt, -12));
+  px(ctx, cx + 7, ty + 3, 2, 7, shade(shirt, -12));
   px(ctx, cx - 8, ty + 10, 2, 2, skin);
-  px(ctx, cx + 6, ty + 10, 2, 2, skin);
+  px(ctx, cx + 7, ty + 10, 2, 2, skin);
   // legs (pants, darker than the shirt) + an alternating walk stride
   const pants = shade(shirt, -55);
   const legTop = ty + 11, legH = feetY - legTop;
