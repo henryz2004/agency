@@ -657,8 +657,11 @@ function syncLabels() {
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
         "font:600 7px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
-        'color:rgba(8,6,4,0.42);text-align:center;' +
-        'text-shadow:0 1px 0 rgba(255,255,255,0.16);' +
+        'color:rgba(14,10,7,0.5);text-align:center;' +
+        // engraved groove: a DARK rim along the top edge (shadowed upper wall) + a
+        // LIGHT lip along the bottom (lit lower wall) → the glyphs read as pressed IN,
+        // not a single drop-shadow sitting on top.
+        'text-shadow:0 -1px 0 rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.22);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
       labelWrap.appendChild(el);
       repoNodes[i] = el;
