@@ -354,7 +354,7 @@ class Avatar {
     const nextIndex = p ? p.i : null;
     if (nextIndex === this._nearestIndex) return;
     this._nearestIndex = nextIndex;
-    dispatchSelect(p ? p.agent : null);
+    dispatchInspect(p ? p.agent : null);
   }
 
   _clearInspection() { this._setInspection(null); }
@@ -458,8 +458,10 @@ class Avatar {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-// Dispatch the EXACT event a desk click dispatches, so the chat
-// panel surfaces the agent the avatar walked up to (or clears on exit).
-function dispatchSelect(agent) {
-  window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: agent || null } }));
+// Dispatch a LIGHT "inspect" event as the avatar walks past desks — office.js
+// turns this into a hover tooltip beside the agent (NOT the heavy detail card, so
+// the floor isn't blocked while you wander). Pressing E (or clicking) opens the
+// full card for the inspected agent. Clears (agent:null) on walk-exit.
+function dispatchInspect(agent) {
+  window.dispatchEvent(new CustomEvent('agency:inspect', { detail: { agent: agent || null } }));
 }

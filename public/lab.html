@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGENCY · layout lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/chat-panel.css" />
+  <style>
+    /* lab controls live in the topbar; reuse the app's dark pixel look */
+    .lab-ctrls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    .lab-ctrl { display: flex; align-items: center; gap: 8px; font: 12px 'IBM Plex Mono', monospace; color: #cdd8ea; }
+    .lab-ctrl input[type=range] { width: 200px; accent-color: #5cd0ff; }
+    .lab-ctrl b { color: #fff; min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    .lab-dims { font: 11px 'IBM Plex Mono', monospace; color: #6b7689; }
+  </style>
+</head>
+<body>
+  <div class="scanlines"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🧪</span>
+      <div class="brand-text">
+        <div class="brand-name" id="brandName">LAYOUT LAB</div>
+        <div class="brand-sub">drag the sliders — the floor re-lays live</div>
+      </div>
+    </div>
+    <div class="topright">
+      <div class="lab-ctrls">
+        <label class="lab-ctrl">agents <input type="range" id="sAgents" min="0" max="40" step="1" value="5" /> <b id="vAgents">5</b></label>
+        <label class="lab-ctrl">teams <input type="range" id="sTeams" min="1" max="10" step="1" value="3" /> <b id="vTeams">3</b></label>
+        <span class="lab-dims" id="dims">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="floor-col">
+      <div class="floor-frame">
+        <div class="world" id="world">
+          <canvas id="office"></canvas>
+          <div id="labels" class="label-layer"></div>
+        </div>
+        <button id="recenter" class="recenter" type="button" title="Recenter the floor">⌖ recenter</button>
+        <div class="floor-hint" id="floorHint">drag to pan · scroll to move · ⌘/pinch to zoom · g to walk</div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { initOffice, setAgents } from '/office.js';
+    import { initChatPanel } from '/chat-panel.js';
+
+    // ---- a faithful-enough synthetic cast: the office groups by `project`, and
+    // the procedural sprites read model/activity/subagents + a seed (pid/sessionId).
+    // Everything else is cosmetic, so we keep the agent shape minimal. ----
+    const PROJECTS = ['startup-agency', 'browser-harness', 'auth-service', 'data-pipeline',
+      'mobile-app', 'ml-infra', 'billing', 'design-system', 'infra', 'payments'];
+    const FIRST = ['Ada', 'Ravi', 'Mona', 'Kenji', 'Lena', 'Otis', 'Priya', 'Theo', 'Yara', 'Cole',
+      'Nina', 'Dax', 'Ines', 'Bram', 'Suki', 'Ezra', 'Milo', 'Joon', 'Rae', 'Tess'];
+    const LAST = ['Vance', 'Okoro', 'Sato', 'Reyes', 'Novak', 'Kapoor', 'Holt', 'Ferro', 'Lund', 'Cruz'];
+    const MODELS = ['claude-opus-4-8[1m]', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'gpt-5-codex'];
+    const ACTS = ['working', 'working', 'shell', 'idle'];
+    const TASKS = ['wire up the live endpoint', 'fix the flaky tests', 'refactor the auth flow',
+      'chase a memory leak', 'draft the release notes', 'tighten the camera clamps', 'migrate the schema'];
+
+    function makeAgents(nAgents, nTeams) {
+      nTeams = Math.max(1, Math.min(nTeams, nAgents, PROJECTS.length));
+      // distribute agents across teams as evenly as possible (round-robin)
+      const sizes = Array(nTeams).fill(0);
+      for (let i = 0; i < nAgents; i++) sizes[i % nTeams]++;
+      const agents = [];
+      let i = 0;
+      for (let t = 0; t < nTeams; t++) {
+        for (let k = 0; k < sizes[t]; k++, i++) {
+          agents.push({
+            sessionId: `lab-${i}`, pid: 5000 + i,
+            source: 'claude', kind: 'interactive',
+            project: PROJECTS[t],
+            name: `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}`,
+            model: MODELS[i % MODELS.length],
+            activity: ACTS[i % ACTS.length],
+            role: (k === 0 && sizes[t] > 1) ? 'lead' : null,
+            subagents: (i % 5 === 0) ? [{ type: 'general-purpose' }] : [],
+            chatName: TASKS[i % TASKS.length],
+            task: null,
+          });
+        }
+      }
+      return agents;
+    }
+
+    const canvas = document.getElementById('office');
+    initOffice(canvas, document.getElementById('labels'));
+    initChatPanel(); // so clicking / E still opens the floating detail card
+
+    const sA = document.getElementById('sAgents'), vA = document.getElementById('vAgents');
+    const sT = document.getElementById('sTeams'), vT = document.getElementById('vTeams');
+    const dims = document.getElementById('dims');
+
+    function render() {
+      const n = +sA.value;
+      let teams = Math.min(+sT.value, n);
+      vA.textContent = n;
+      vT.textContent = teams;
+      setAgents(makeAgents(n, teams));
+      // report the resulting buffer size + aspect (office exposes nothing, so peek
+      // at the canvas the renderer just sized)
+      requestAnimationFrame(() => {
+        const w = canvas.width, h = canvas.height;
+        dims.textContent = w && h ? `room ${w}×${h}  ·  aspect ${(w / h).toFixed(2)}` : '';
+      });
+    }
+
+    // deep-link / headless-screenshot support: ?agents=5&teams=3 seeds the sliders
+    const q = new URLSearchParams(location.search);
+    if (q.has('agents')) sA.value = q.get('agents');
+    if (q.has('teams')) sT.value = q.get('teams');
+
+    sA.addEventListener('input', render);
+    sT.addEventListener('input', render);
+    render();
+  </script>
+</body>
+</html>

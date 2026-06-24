@@ -3,42 +3,57 @@
    touching it. Reuses the shared :root design tokens defined there — including
    the --t-* / --p-* type scale, so the panel matches the rest of the app. */
 
+/* A compact card that FLOATS beside the selected agent (office.js sets left/top
+   each frame so it tracks the agent + camera) — not a screen-blocking rail. */
 .chat-panel {
   position: fixed;
-  top: 72px; /* below the topbar */
-  right: 0;
-  bottom: 0;
-  width: 420px;
+  left: 0; top: 80px; /* office.js overrides left/top to pin it beside the agent */
+  width: 380px;
   max-width: 92vw;
+  max-height: 62vh;
   z-index: 200;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, var(--card), var(--card2));
-  border-left: 2px solid var(--line);
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
-  transform: translateX(100%);
-  transition: transform 0.22s ease;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+  overflow: hidden; /* the body scrolls instead of the whole card */
   font-family: var(--term);
+  /* show/hide is a quick fade+pop (position comes from left/top, not transform) */
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
 .chat-panel.open {
-  transform: translateX(0);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
 }
 
-/* head */
+/* head — a vertical stack: the title/close row, then the compact rename+hide
+   strip. (The rename + hide controls were consolidated up here so the body is
+   pure status/transcript.) */
 .cp-head {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 16px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 13px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, #121828, #0c111b);
+}
+.cp-headtop {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
 }
 .cp-id {
   min-width: 0;
   flex: 1 1 auto;
 }
 .cp-title {
-  font-size: var(--t-h);
+  font-size: 17px;
   color: var(--gold);
   line-height: 1.1;
   display: flex;
@@ -47,7 +62,7 @@
 }
 .cp-role {
   font-family: var(--pixel);
-  font-size: var(--p-chip);
+  font-size: 7px;
   line-height: 1;
   letter-spacing: 1px;
   border-radius: 2px;
@@ -62,9 +77,9 @@
   background: var(--cyan);
 }
 .cp-sub {
-  font-size: var(--t-sub);
+  font-size: var(--t-fine);
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -77,11 +92,15 @@
   background: transparent;
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   line-height: 1;
   border-radius: 4px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   cursor: pointer;
+}
+/* empty edit strip (no sessionId agent) collapses so it adds no header gap */
+.cp-edit:empty {
+  display: none;
 }
 .cp-close:hover {
   color: var(--ink);
@@ -93,10 +112,10 @@
 .cp-body {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 11px 13px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 /* ---- status + metrics card ----------------------------------------------- */
@@ -109,10 +128,10 @@
   border-left: 3px solid var(--green);
   border-radius: 6px;
   background: linear-gradient(180deg, #0f1a16, #0c1512);
-  padding: 11px 12px;
+  padding: 9px 11px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 .cp-activity.shell { border-left-color: #ffb454; background: linear-gradient(180deg, #1a160c, #15110a); }
 .cp-activity.idle { border-left-color: var(--muted2); background: var(--card2); }
@@ -128,7 +147,7 @@
 .cp-act-dot.idle { background: var(--muted2); box-shadow: none; animation: none; }
 .cp-act-dot.done { background: var(--cyan); box-shadow: 0 0 7px var(--cyan); animation: none; }
 .cp-act-status {
-  font-family: var(--pixel); font-size: var(--p-chip); letter-spacing: 1px;
+  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
   text-transform: uppercase; color: var(--green);
 }
 .cp-activity.shell .cp-act-status { color: #ffb454; }
@@ -137,12 +156,12 @@
 
 /* the task/topic the agent is working toward */
 .cp-act-task {
-  font-size: var(--t-val); line-height: 1.3; color: var(--ink);
+  font-size: var(--t-body); line-height: 1.3; color: var(--ink);
   overflow-wrap: anywhere;
 }
 /* the headline 30-min activity readout: "⚡ 14 tool calls · 12.3k tokens" */
 .cp-act-metrics {
-  font-family: var(--mono); font-size: var(--t-body); line-height: 1.3; color: var(--ink);
+  font-family: var(--mono); font-size: var(--t-sub); line-height: 1.3; color: var(--ink);
   overflow-wrap: anywhere;
 }
 .cp-act-bolt { color: var(--gold); margin-right: 3px; }
@@ -152,22 +171,22 @@
 /* the live action line: "doing now Editing app.js". Empty (collapsed) when
    no tool is in flight, so an idle agent shows nothing here. */
 .cp-act-now {
-  font-size: var(--t-body); line-height: 1.35; color: var(--muted);
+  font-size: var(--t-sub); line-height: 1.35; color: var(--muted);
   overflow-wrap: anywhere;
 }
 .cp-act-now.cp-act-empty { display: none; }
 .cp-act-label {
-  font-family: var(--pixel); font-size: var(--p-chip); letter-spacing: 1px;
+  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
   text-transform: uppercase; color: var(--muted2); margin-right: 5px;
 }
 .cp-act-target { color: var(--cyan); }
 .cp-dim { color: var(--muted2); } /* generic dim (blocked-banner hint, etc.) */
 .cp-act-now .cp-dim { color: var(--muted2); }
-.cp-act-sub { font-size: var(--t-sub); color: #46d6cf; }
+.cp-act-sub { font-size: var(--t-fine); color: #46d6cf; }
 
 /* notes + teammate launch brief */
 .cp-note {
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   color: var(--muted);
   line-height: 1.4;
 }
@@ -175,7 +194,7 @@
   color: var(--muted2);
 }
 .cp-brief {
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   line-height: 1.4;
   color: var(--ink);
   white-space: pre-wrap;
@@ -190,12 +209,12 @@
 /* last-message peek — the most recent turn(s) so a desk maps to a real session
    at a glance (the rest of the panel is honest-status, not a transcript). */
 .cp-lastmsg {
-  margin-top: 4px; padding: 11px 12px;
+  margin-top: 2px; padding: 9px 11px;
   background: var(--card2); border: 1px solid var(--line2);
-  border-radius: 8px; display: flex; flex-direction: column; gap: 9px;
+  border-radius: 8px; display: flex; flex-direction: column; gap: 8px;
 }
 .cp-lastmsg-head {
-  font-family: var(--pixel); font-size: var(--p-chip); letter-spacing: 1px;
+  font-family: var(--pixel); font-size: 7px; letter-spacing: 1px;
   text-transform: uppercase; color: var(--muted2);
 }
 .cp-msg { display: flex; gap: 8px; align-items: flex-start; }
@@ -206,51 +225,44 @@
 }
 .cp-msg-you .cp-msg-who { color: #04222e; background: var(--cyan); }
 .cp-msg-agent .cp-msg-who { color: #06231f; background: var(--green); }
-.cp-msg-text { font-size: var(--t-body); line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.cp-msg-text { font-size: var(--t-sub); line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
 .cp-msg-agent .cp-msg-text { color: var(--muted); }
 
-/* footer actions: resume cmd + path, each with a copy button */
+/* footer actions: one clean row — a short note, then "Open in Terminal" + copy.
+   The raw resume command is no longer shown (too small to read); copy still
+   copies the full command to the clipboard. */
 .cp-actions {
-  margin-top: 4px;
+  margin-top: 2px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   border-top: 1px dotted var(--line2);
-  padding-top: 10px;
+  padding-top: 9px;
 }
 .cp-action-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 6px;
 }
-.cp-cmd,
-.cp-path {
+.cp-action-note {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: var(--term);
-  font-size: var(--t-body);
-  color: var(--ink);
-  background: #0c1119;
-  border: 1px solid var(--line2);
-  border-radius: 4px;
-  padding: 5px 7px;
-  white-space: nowrap;
-  overflow-x: auto;
-}
-.cp-path {
+  font-size: var(--t-sub);
+  line-height: 1.3;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .cp-copy {
   flex: 0 0 auto;
   font-family: var(--pixel);
-  font-size: var(--p-chip);
+  font-size: 7px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink);
   background: #16203a;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 0 9px;
+  padding: 6px 8px;
   cursor: pointer;
 }
 .cp-copy:hover {
@@ -266,14 +278,14 @@
 .cp-open {
   flex: 0 0 auto;
   font-family: var(--pixel);
-  font-size: var(--p-chip);
+  font-size: 7px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: #2a1f05;
   background: var(--gold);
   border: 1px solid var(--gold);
   border-radius: 4px;
-  padding: 0 9px;
+  padding: 6px 8px;
   cursor: pointer;
 }
 .cp-open:hover {
@@ -284,17 +296,9 @@
   cursor: default;
 }
 
-/* customize controls (rename + hide): a small "edit this agent" affordance for
-   any agent with a sessionId. Reads as a quiet edit row beneath the actions, not
-   a dominant block. Reuses the shared :root tokens. */
-.cp-customize {
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border-top: 1px dotted var(--line2);
-  padding-top: 10px;
-}
+/* customize controls (rename + hide): a compact single-row strip in the HEADER
+   (a slim rename field + Save, then a small hide toggle). Quiet, dense; reuses
+   the shared :root tokens. */
 .cp-cust-row {
   display: flex;
   align-items: stretch;
@@ -305,12 +309,12 @@
   min-width: 0;
   box-sizing: border-box;
   font-family: var(--term);
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   color: var(--ink);
   background: #0c1119;
   border: 1px solid var(--line2);
   border-radius: 4px;
-  padding: 5px 7px;
+  padding: 4px 7px;
 }
 .cp-cust-input:focus {
   outline: none;
@@ -319,14 +323,14 @@
 .cp-cust-save {
   flex: 0 0 auto;
   font-family: var(--pixel);
-  font-size: var(--p-chip);
+  font-size: 7px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--ink);
   background: #16203a;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 0 11px;
+  padding: 0 9px;
   cursor: pointer;
 }
 .cp-cust-save:hover {
@@ -341,17 +345,16 @@
   opacity: 0.6;
   cursor: default;
 }
+/* hide: a small icon toggle (👁 / 🙈) — quiet, square-ish, sits beside Save */
 .cp-cust-hide {
-  align-self: flex-start;
-  font-family: var(--pixel);
-  font-size: var(--p-chip);
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
   color: var(--muted);
   background: transparent;
   border: 1px solid var(--line2);
   border-radius: 4px;
-  padding: 5px 9px;
+  padding: 0 8px;
   cursor: pointer;
 }
 .cp-cust-hide:hover {
@@ -410,7 +413,7 @@
   background: var(--card2);
 }
 .cp-reply-head {
-  font-size: var(--t-sub);
+  font-size: var(--t-fine);
   color: var(--gold);
   display: flex;
   align-items: center;
@@ -431,7 +434,7 @@
   50% { opacity: 0.35; }
 }
 .cp-reply-q {
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   line-height: 1.35;
   color: var(--muted);
   white-space: pre-wrap;
@@ -446,7 +449,7 @@
   box-sizing: border-box;
   resize: vertical;
   font-family: var(--term);
-  font-size: var(--t-body);
+  font-size: var(--t-sub);
   line-height: 1.35;
   color: var(--ink);
   background: #0c1119;

@@ -25,6 +25,7 @@ let panelEl = null;
 let bodyEl = null;
 let titleEl = null;
 let subEl = null;
+let editEl = null; // header-level rename + hide strip (rebuilt per selection)
 let currentKey = null; // selection key of the agent currently shown
 let reqToken = 0; // guards against out-of-order fetch responses
 let refreshTimer = null; // periodic /api/transcript re-fetch while the panel is open
@@ -60,11 +61,14 @@ function build() {
   panelEl.setAttribute('aria-hidden', 'true');
   panelEl.innerHTML = `
     <div class="cp-head">
-      <div class="cp-id">
-        <div class="cp-title" id="cpTitle">—</div>
-        <div class="cp-sub" id="cpSub"></div>
+      <div class="cp-headtop">
+        <div class="cp-id">
+          <div class="cp-title" id="cpTitle">—</div>
+          <div class="cp-sub" id="cpSub"></div>
+        </div>
+        <button type="button" class="cp-close" id="cpClose" title="Close (Esc)" aria-label="Close">✕</button>
       </div>
-      <button type="button" class="cp-close" id="cpClose" title="Close (Esc)" aria-label="Close">✕</button>
+      <div class="cp-edit" id="cpEdit"></div>
     </div>
     <div class="cp-body" id="cpBody"></div>`;
   document.body.appendChild(panelEl);
@@ -72,6 +76,7 @@ function build() {
   bodyEl = panelEl.querySelector('#cpBody');
   titleEl = panelEl.querySelector('#cpTitle');
   subEl = panelEl.querySelector('#cpSub');
+  editEl = panelEl.querySelector('#cpEdit');
 
   panelEl.querySelector('#cpClose').addEventListener('click', () => close());
   // Esc closes when the panel is open.
@@ -182,18 +187,25 @@ function setHeader(a) {
         ? '<span class="cp-role teammate">teammate</span>'
         : '';
   titleEl.innerHTML = `${esc(a.name || '—')} ${roleTag}`;
+  // Sub-line is project · model (the agent title — "Distinguished Eng" — was
+  // dropped as noise; project + model are what identify the desk).
   const bits = [];
-  if (a.title) bits.push(esc(a.title));
   if (a.project) bits.push(`<span class="cp-dept">${esc(a.project)}</span>`);
   if (a.model) bits.push(esc(shortModel(a.model)));
   subEl.innerHTML = bits.join(' · ');
+  // The rename + hide strip lives in the header now (not the body), so the body
+  // is just status/transcript. Rebuilt per selection; self-gates to null.
+  editEl.innerHTML = '';
+  const cust = customizeControls(a);
+  if (cust) editEl.appendChild(cust);
 }
 
 // A small "footer" of actions shown beneath any content. The primary action is
 // "Open in Terminal" — it jumps you back into the agent via `claude --resume`
-// (the one non-read-only call; see openTerminalButton). The command is shown as
-// copyable text for fallback. (Reveal-in-Finder was dropped — copying a path is
-// busywork; resuming the session is the useful thing.)
+// (the one non-read-only call; see openTerminalButton). A "copy" button copies
+// the full resume command for fallback; the command itself is NOT shown (too
+// small to read, and you can't act on the raw text anyway). One clean row: a
+// short note, then the terminal + copy buttons.
 function actionsFor(a, transcript) {
   const wrap = document.createElement('div');
   wrap.className = 'cp-actions';
@@ -210,22 +222,19 @@ function actionsFor(a, transcript) {
     // "Background agent" isn't a meaningful category — it's just an agent in agent
     // mode, and it IS reachable. Frame by the SPAWN relationship (was it spawned by
     // someone?), never as inaccessible. The terminal button below is the jump-in.
+    const row = document.createElement('div');
+    row.className = 'cp-action-row';
     const note = document.createElement('div');
     note.className = 'cp-action-note';
     note.textContent = bg
       ? a.leadName
-        ? `Spawned by ${a.leadName} — part of their run.`
+        ? `Spawned by ${a.leadName}.`
         : 'Running in agent mode.'
-      : 'Resume this session to read or message it.';
-    wrap.appendChild(note);
-    const row = document.createElement('div');
-    row.className = 'cp-action-row';
-    const code = document.createElement('code');
-    code.className = 'cp-cmd';
-    code.textContent = resumeCmd;
-    row.appendChild(code);
+      : 'Resume to read or message it.';
+    row.appendChild(note);
     row.appendChild(openTerminalButton(a));
-    row.appendChild(copyButton('copy', resumeCmd, 'Copy the command'));
+    // copy still copies the FULL resume command, even though it isn't shown.
+    row.appendChild(copyButton('copy', resumeCmd, 'Copy the resume command'));
     wrap.appendChild(row);
   }
 
@@ -271,9 +280,11 @@ function renderNote(html) {
 }
 
 // ---- customize controls (rename + hide) -----------------------------------
-// A small "edit this agent" affordance for any agent with a sessionId (claude
-// sessions, teammates, opencode, codex). Both controls persist server-side via
-// POST /api/agent-override and only WRITE the field they touch:
+// A compact "edit this agent" strip rendered IN THE HEADER (see setHeader) for
+// any agent with a sessionId (claude sessions, teammates, opencode, codex): a
+// slim rename field + Save and a small hide toggle on one row, so the body stays
+// pure status/transcript. Both controls persist server-side via POST
+// /api/agent-override and only WRITE the field they touch:
 //   • RENAME → { sessionId, name }  (name:"" resets to the minted roster name)
 //   • HIDE   → { sessionId, hidden } (toggles agent.hidden; office.js owns state)
 // Each control flashes a transient confirmation on its own button, mirroring the
@@ -301,18 +312,17 @@ function customizeControls(a) {
   // Gate: only render for a selectable real agent carrying a sessionId.
   if (!a || !a.sessionId) return null;
 
+  // One compact row: a slim rename field + Save, then a small hide toggle.
   const wrap = document.createElement('div');
-  wrap.className = 'cp-customize';
+  wrap.className = 'cp-customize cp-cust-row';
 
   // --- rename: input pre-filled with the current name + a Save button. Saving
   // an empty input clears the custom name (server resets to the minted name). ---
-  const renameRow = document.createElement('div');
-  renameRow.className = 'cp-cust-row';
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'cp-cust-input';
   input.value = a.name || '';
-  input.placeholder = 'Rename this agent…';
+  input.placeholder = 'Rename…';
   input.title = 'Rename this agent (clear to reset to its minted name)';
   const save = document.createElement('button');
   save.type = 'button';
@@ -325,22 +335,23 @@ function customizeControls(a) {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submitName(); }
   });
-  renameRow.appendChild(input);
-  renameRow.appendChild(save);
-  wrap.appendChild(renameRow);
+  wrap.appendChild(input);
+  wrap.appendChild(save);
 
-  // --- hide: a toggle reflecting agent.hidden. Optimistically flips its own
-  // label; the next /api/state poll reflects the real (render-owned) state. ---
+  // --- hide: a small icon toggle reflecting agent.hidden. Optimistically flips
+  // its own glyph/label; the next /api/state poll reflects the real state. ---
   const hide = document.createElement('button');
   hide.type = 'button';
   hide.className = 'cp-cust-hide';
-  const labelFor = (hidden) => (hidden ? 'Unhide' : 'Hide from floor');
+  const labelFor = (hidden) => (hidden ? '🙈' : '👁');
+  const titleFor = (hidden) => (hidden ? 'Unhide — show on the floor again' : 'Hide this agent from the office floor');
   hide.textContent = labelFor(a.hidden);
-  hide.title = 'Hide this agent from the office floor';
+  hide.title = titleFor(a.hidden);
   hide.addEventListener('click', () => {
     const next = !a.hidden;
     a.hidden = next; // optimistic; office.js reconciles on the next poll
     const prev = labelFor(next);
+    hide.title = titleFor(next);
     postOverride(hide, { sessionId: a.sessionId, hidden: next }, prev);
   });
   wrap.appendChild(hide);
@@ -668,10 +679,8 @@ function show(agent) {
     } else {
       bodyEl.appendChild(renderNote('<span class="cp-dim">No launch brief on record.</span>'));
     }
-    // Teammates can be renamed/hidden too when they carry a sessionId-ish key;
-    // customizeControls self-gates and returns null for ones without it.
-    const cust = customizeControls(agent);
-    if (cust) bodyEl.appendChild(cust);
+    // (Rename/hide for this teammate, when it carries a sessionId-ish key, lives
+    // in the header strip now — see setHeader → customizeControls.)
     // Reach path: a teammate runs INSIDE its lead's session, so jumping in =
     // opening the lead. Reuse actionsFor with a lead-targeted pseudo-agent.
     if (agent.leadSessionId && agent.cwd) {
@@ -693,8 +702,6 @@ function show(agent) {
     bodyEl.appendChild(renderActivityCard(agent, null, agent.metrics || null));
     const acts = actionsFor(agent, null);
     if (acts) bodyEl.appendChild(acts);
-    const cust = customizeControls(agent);
-    if (cust) bodyEl.appendChild(cust);
     return;
   }
 
@@ -711,8 +718,6 @@ function show(agent) {
     const banner = renderBlockedBanner(agent, !!acts);
     bodyEl.appendChild(banner);
     if (acts) bodyEl.appendChild(acts);
-    const cust = customizeControls(agent);
-    if (cust) bodyEl.appendChild(cust);
     // A blocked BACKGROUND agent still has a transcript on disk — surface its last
     // message(s) too (it used to show only the attach banner), so you can see what
     // it's blocked on without attaching. Fetched async, inserted just below the banner.
@@ -758,8 +763,6 @@ function show(agent) {
   bodyEl.appendChild(activityCard);
   const acts = actionsFor(agent, null);
   if (acts) bodyEl.appendChild(acts);
-  const cust = customizeControls(agent);
-  if (cust) bodyEl.appendChild(cust);
 
   const token = reqToken; // already bumped at the top of show(); guards this fetch
   const url = `/api/transcript?sessionId=${encodeURIComponent(agent.sessionId)}&cwd=${encodeURIComponent(agent.cwd)}`;
@@ -779,10 +782,8 @@ function show(agent) {
       const lastMsgs = renderLastMessages(data && data.messages);
       if (lastMsgs) bodyEl.appendChild(lastMsgs);
       if (newActs) bodyEl.appendChild(newActs);
-      // Re-append the customize controls — the rebuild cleared bodyEl. Reuse the
-      // same element (innerHTML='' only detached it) so any half-typed rename or
-      // in-flight save flash survives the metrics patch.
-      if (cust) bodyEl.appendChild(cust);
+      // The rename/hide strip lives in the header (editEl), which this rebuild
+      // leaves untouched — so a half-typed rename survives the metrics patch.
     })
     .catch(() => {
       if (token !== reqToken) return;

@@ -18,7 +18,6 @@ const CLUSTER_PAD = 6;             // inset around a cluster's cells
 const HEADER_H = 14;               // repo-label clearance atop each cluster (DOM tab sits here)
 const GAP_X = 16;                  // gap between blocks on a row
 const GAP_Y = 20;                  // gap between rows
-const TILE_COLS = 3;               // max cubicles across per cluster
 const UPSCALE = 3;                 // canvas is CSS-scaled this much; the DOM label layer matches
 
 let canvas, ctx, bufW = 0, bufH = 0, frame = 0;
@@ -39,6 +38,7 @@ const cat = { x: 0, y: 0, tx: 0, ty: 0, sit: true, until: 0, init: false, dir: 1
 // the dog lounges in a fixed spot but is PETTABLE like the cat (walk up → hearts);
 // a floor entity so it z-sorts + animates. Position set in layout().
 const dog = { x: 0, y: 0, init: false, petted: false };
+if (typeof window !== 'undefined') { window.__cat = cat; window.__dog = dog; } // reel hooks: frame/control the pets
 // Idle-wander: settled-idle workers leave their desk and amble around the floor —
 // to a JITTERED point inside a lounge/kitchen zone (so they spread out instead of
 // stacking on a fixed spot), often hopping between spots before heading home, and
@@ -59,7 +59,10 @@ const leadNodes = [];        // pooled "▸ leadName" captions tying teammates t
 // ---- layout ----------------------------------------------------------------
 
 function clusterDims(count) {
-  const cols = Math.min(count, TILE_COLS);
+  // Lay a team's desks as a LANDSCAPE block (wider than tall) so a big team grows
+  // SIDEWAYS instead of into a tall column. A cell is 58w×78h (taller than wide),
+  // so to read landscape we need cols well above rows: cols ≈ √(count · 2.4).
+  const cols = Math.min(count, Math.max(1, Math.ceil(Math.sqrt(count * 2.4))));
   const rows = Math.ceil(count / cols);
   return {
     cols, rows,
@@ -97,12 +100,20 @@ const LOUNGE_BAND_H = 60; // height of the decor band beneath the bullpen
 // Reserved band at the top of the floor for back-wall amenities (the kitchen
 // counter ends at TOP+25) and the hanging ceiling pendants (end ~TOP+18). The
 // bullpen starts below this so decor never clips a cluster rug — count-independent.
-const AMENITY_BAND_H = 30;
+const AMENITY_BAND_H = 16;
 // Target bullpen aspect (width:height). >1 packs the desk clusters LANDSCAPE so
 // the floor fills a desktop viewport instead of a tall portrait column. Biased
 // well above 1 because the fixed amenity + lounge bands add height the bullpen
 // must out-widen. Tuned by eye against the floor-frame.
 const LANDSCAPE_ASPECT = 2.6;
+// Decor placement keeps the WHOLE room a consistent, screen-friendly shape no
+// matter the head-count: a wide bullpen gets a lounge BAND beneath it; a narrow
+// one (few teams) would read as a squashed, too-tall column, so it gets flanking
+// SIDE decor columns instead — widening the room toward TARGET_ASPECT and keeping
+// the desks centred rather than stranded at the top of the frame.
+const SIDE_COL_W = 104;    // width of each flanking decor column
+const SIDE_COL_GAP = 16;   // gap between a side column and the bullpen
+const TARGET_ASPECT = 1.7; // desired room width:height (cover-fit ≈ contain at this shape)
 
 function plan() {
   clusters = []; decor = []; cells = [];
@@ -166,49 +177,124 @@ function plan() {
     }
   });
 
-  // --- buffer width: the bullpen plus margins, but at least wide enough to host
-  // the lounge band + amenities so few-agent floors still read like a real room. ---
-  const minRoomW = 360;
-  bufW = Math.max(minRoomW, rowW + MARGIN * 2);
+  // --- DECOR PLACEMENT: keep the room screen-shaped without stranding desks in a
+  // cavern. Three regimes by floor size:
+  //   SNUG (≤4 desks): hug the desks with minimal furniture — a small office, not a
+  //     hall. (Cuts the horizontal size + furniture for tiny floors.)
+  //   SIDE (narrow bullpen): flank with lounge columns to widen toward TARGET_ASPECT.
+  //   BAND (wide bullpen): a lounge band beneath, plus filler decor when the room is
+  //     big so a large floor doesn't read as empty.
+  const nAgents = cells.length;
+  const bullH = bullpenBottom - by0;
+  const minRoomW = 320;
 
-  // --- cozy LOUNGE BAND beneath the bullpen: a couch lounge, a meeting table,
-  // and plant beds spread across the floor width so the lower half reads furnished
-  // rather than empty. Sized to the room; trimmed on a narrow (few-agent) floor. ---
-  const bandY = bullpenBottom + 8;
-  const bandItems = bufW > 520
-    ? [
-        { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
-        { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
-      ]
-    : bufW > 300
-      ? [{ type: 'lounge', w: 100 }, { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }]
-      : [{ type: 'lounge', w: 100 }, { type: 'plants', w: 40 }];
-  // lay the band centred across the floor with even gaps
-  const bandTotal = bandItems.reduce((s, it) => s + it.w, 0);
-  const bandGap = bandItems.length > 1 ? Math.max(18, (bufW - MARGIN * 2 - bandTotal) / (bandItems.length - 1)) : 0;
-  let lx = MARGIN + Math.max(0, (bufW - MARGIN * 2 - bandTotal - bandGap * (bandItems.length - 1)) / 2);
-  bandItems.forEach((it) => {
-    decor.push({ type: it.type, x: Math.round(lx), y: bandY, w: it.w, h: LOUNGE_BAND_H, seed: hashInt(it.type + lx) });
-    lx += it.w + bandGap;
-  });
+  if (nAgents <= 4) {
+    // ---- SNUG: a cozy small office — desks high under the wall, a plant bed in each
+    // UPPER CORNER tucked against the back wall (head-on, so it overlaps the wall's
+    // base) instead of at desk height where it clipped the rug. ----
+    const flankW = nAgents <= 2 ? 40 : 52; // slim flanks for 1–2 desks
+    const gap = 10;
+    bufW = rowW + 2 * (flankW + gap) + MARGIN * 2;
+    bufH = bullpenBottom + 16 + MARGIN;
+    clusters.forEach((c) => { c.x += flankW + gap; });
+    cells.forEach((c) => { c.x += flankW + gap; });
+    // a plant bed in each upper corner, standing AGAINST the wall (overlaps its base)
+    decor.push({ type: 'plants', x: MARGIN, y: TOP - 6, w: flankW, h: 44, seed: hashInt('pl') });
+    decor.push({ type: 'plants', x: bufW - MARGIN - flankW, y: TOP - 6, w: flankW, h: 44, seed: hashInt('pr') });
+    dog.x = bufW - MARGIN - flankW / 2; dog.y = bullpenBottom - 4; dog.init = true;
+  } else {
+  const roomWbottom = Math.max(minRoomW, rowW + MARGIN * 2);
+  const roomHbottom = bullpenBottom + 8 + LOUNGE_BAND_H + MARGIN + 8;
+  const sideMode = roomWbottom / roomHbottom < TARGET_ASPECT;
+  if (sideMode) {
+    // --- SIDE decor columns flanking a narrow bullpen ---
+    const bullpenH = bullpenBottom - by0;
+    bufW = rowW + 2 * (SIDE_COL_W + SIDE_COL_GAP) + MARGIN * 2;
+    // size the room to TARGET_ASPECT (but never shorter than the bullpen needs),
+    // then FILL the floor height with side decor and CENTRE the desks in it — so a
+    // short bullpen isn't stranded in the lower half beneath a tall empty wall.
+    const targetH = Math.max(by0 + bullpenH + MARGIN + 8, Math.round(bufW / TARGET_ASPECT));
+    const colTop = TOP + 2;                       // hug the wall (decor overlaps its base)
+    const colFloor = targetH - MARGIN - 8;        // bottom of the usable floor area
+    const span = colFloor - colTop;
+    const itemH = LOUNGE_BAND_H;
+    const nItems = clampN(Math.floor((span + 14) / (itemH + 14)), 1, 3);
+    // spread the items to fill the column span (top + bottom anchored, even gaps)
+    const vgap = nItems > 1 ? (span - nItems * itemH) / (nItems - 1) : 0;
 
-  // --- bounds (now that the band is placed) ---
-  let maxY = bullpenBottom;
-  decor.forEach((z) => { maxY = Math.max(maxY, z.y + z.h); });
-  bufH = Math.round(maxY) + MARGIN + 8;
-
-  // centre the bullpen horizontally in the (possibly wider) room
-  const bullShift = Math.round((bufW - MARGIN * 2 - rowW) / 2);
-  if (bullShift > 0) {
+    // desks stay HIGH under the wall (no vertical centring) — the space that used to
+    // sit empty ABOVE them now lives below as a furnished lounge. Slide the bullpen
+    // into the middle lane between the columns.
+    const bullShift = SIDE_COL_W + SIDE_COL_GAP;
     clusters.forEach((c) => { c.x += bullShift; });
     cells.forEach((c) => { c.x += bullShift; });
+
+    // stack decor down each column; lounges anchor the room, plants soften the gaps
+    const leftTypes = ['lounge', 'plants', 'meeting'];
+    const rightTypes = ['meeting', 'plants', 'lounge'];
+    const leftX = MARGIN, rightX = bufW - MARGIN - SIDE_COL_W;
+    for (let i = 0; i < nItems; i++) {
+      const y = Math.round(colTop + i * (itemH + vgap));
+      decor.push({ type: leftTypes[i], x: leftX, y, w: SIDE_COL_W, h: itemH, seed: hashInt('L' + i) });
+      decor.push({ type: rightTypes[i], x: rightX, y, w: SIDE_COL_W, h: itemH, seed: hashInt('R' + i) });
+    }
+
+    // --- point 3: FILL the open floor above/below the vertically-centred bullpen in
+    // the middle lane, so a large office reads furnished instead of barren. ---
+    const laneX = MARGIN + SIDE_COL_W + SIDE_COL_GAP;
+    const botTop = bullpenBottom + 10;
+    if (colFloor - botTop >= 46) {
+      // a lounge band tucked under the desks, spread across the middle lane — this is
+      // where the desks' old empty headroom went (now furnished, not dead).
+      const items = rowW > 360 ? ['lounge', 'meeting', 'lounge'] : rowW > 190 ? ['lounge', 'plants'] : ['plants'];
+      const iw = Math.min(110, (rowW - 12) / items.length);
+      const g = items.length > 1 ? (rowW - items.length * iw) / (items.length - 1) : 0;
+      const h = Math.min(LOUNGE_BAND_H, colFloor - botTop);
+      items.forEach((t, i) => decor.push({ type: t, x: Math.round(laneX + i * (iw + g)), y: botTop, w: Math.round(iw), h, seed: hashInt('bg' + i) }));
+    }
+    bufH = targetH;
+    // the dog lounges at the foot of the right-hand decor column
+    dog.x = rightX + SIDE_COL_W / 2; dog.y = colFloor - 6; dog.init = true;
+  } else {
+    // --- cozy LOUNGE BAND beneath a wide bullpen ---
+    bufW = roomWbottom;
+    const bandY = bullpenBottom + 8;
+    const bandItems = bufW > 520
+      ? [
+          { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
+          { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
+        ]
+      : bufW > 300
+        ? [{ type: 'lounge', w: 100 }, { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }]
+        : [{ type: 'lounge', w: 100 }, { type: 'plants', w: 40 }];
+    // lay the band centred across the floor with even gaps
+    const bandTotal = bandItems.reduce((s, it) => s + it.w, 0);
+    const bandGap = bandItems.length > 1 ? Math.max(18, (bufW - MARGIN * 2 - bandTotal) / (bandItems.length - 1)) : 0;
+    let lx = MARGIN + Math.max(0, (bufW - MARGIN * 2 - bandTotal - bandGap * (bandItems.length - 1)) / 2);
+    bandItems.forEach((it) => {
+      decor.push({ type: it.type, x: Math.round(lx), y: bandY, w: it.w, h: LOUNGE_BAND_H, seed: hashInt(it.type + lx) });
+      lx += it.w + bandGap;
+    });
+
+    let maxY = bullpenBottom;
+    decor.forEach((z) => { maxY = Math.max(maxY, z.y + z.h); });
+    bufH = Math.round(maxY) + MARGIN + 8;
+
+    // centre the bullpen horizontally in the (possibly wider) room
+    const bullShift = Math.round((bufW - MARGIN * 2 - rowW) / 2);
+    if (bullShift > 0) {
+      clusters.forEach((c) => { c.x += bullShift; });
+      cells.forEach((c) => { c.x += bullShift; });
+    }
+    // the dog lounges in the band beneath the desks
+    dog.x = bufW - 60; dog.y = bandY + LOUNGE_BAND_H - 4; dog.init = true;
   }
 
-  // --- fixed amenities + pets ---
-  // kitchen counter standing against the back wall on the far right
-  decor.push({ type: 'kitchen', x: bufW - 84, y: TOP - 1, w: 78, h: 30, seed: 999 });
-  // the cat roams (see updateCat); the dog lounges in a fixed spot but is pettable
-  dog.x = bufW - 60; dog.y = bandY + LOUNGE_BAND_H - 4; dog.init = true;
+    // kitchen counter tucked UP against the back wall — FULL floors only (a snug
+    // office skips it). Raised so its base ends above the desk line (by0) instead of
+    // dipping down into a team rug.
+    decor.push({ type: 'kitchen', x: bufW - 84, y: TOP - 12, w: 78, h: 26, seed: 999 });
+  }
 
   // idle-wander destination ZONES: the lounge spots (couch / meeting / plants) plus
   // the kitchen/vending bar, so workers actually visit the amenities. Stored as
@@ -217,6 +303,17 @@ function plan() {
   wanderZones = decor
     .filter((z) => z.type === 'lounge' || z.type === 'meeting' || z.type === 'plants' || z.type === 'kitchen')
     .map((z) => ({ x: z.x, y: z.y, w: z.w, h: z.h, kind: z.type }));
+
+  // focal point = centre of the desk bullpen, so fitView() frames the desks on any
+  // room shape (not the empty back wall).
+  if (clusters.length) {
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    clusters.forEach((c) => {
+      minx = Math.min(minx, c.x); maxx = Math.max(maxx, c.x + c.w);
+      miny = Math.min(miny, c.y); maxy = Math.max(maxy, c.y + c.h);
+    });
+    focusBX = (minx + maxx) / 2; focusBY = (miny + maxy) / 2;
+  } else { focusBX = bufW / 2; focusBY = bufH / 2; }
 }
 
 // ---- decor drawing ---------------------------------------------------------
@@ -307,13 +404,19 @@ function drawMeeting(z) {
 
 function drawPlants(z) {
   const floorY = z.y + z.h - 4;
-  // a low wood planter box with two staggered plants
+  // a low wood planter box with plants TILED across it, so a wide bed reads as a
+  // full planter — not two lonely plants at the ends with an empty box between.
   const bx = z.x + 2, bw = z.w - 4, by = floorY - 6;
   px(ctx, bx, by, bw, 7, '#6f4d2b');
   px(ctx, bx, by, bw, 2, '#8a6238');
   px(ctx, bx, by + 6, bw, 1, '#5a3d22');
-  drawPlant(ctx, z.x + 2, floorY - 5);
-  drawPlant(ctx, z.x + z.w - 16, floorY - 1);
+  const slot = 14;                            // a single plant's footprint
+  const n = Math.max(1, Math.floor(bw / 18)); // ~one plant per 18px of box
+  const gap = n > 1 ? (bw - n * slot) / (n - 1) : 0;
+  const x0 = bx + (n > 1 ? 0 : (bw - slot) / 2); // centre a lone plant
+  for (let i = 0; i < n; i++) {
+    drawPlant(ctx, Math.round(x0 + i * (slot + gap)), floorY - (i % 2 ? 1 : 5));
+  }
 }
 
 function drawPlant(ctx, x, baseY) {
@@ -420,36 +523,6 @@ function drawDog(ctx, x, y, opts = {}) {
   }
 }
 
-// ---- ceiling pendant lights pooling warmth over each cluster ----------------
-function drawCeilingLights(glow = 0) {
-  const py = TOP + 3;
-  // a service pipe across the top of the floor
-  px(ctx, 0, py, bufW, 3, '#b8493d');
-  px(ctx, 0, py, bufW, 1, 'rgba(255,255,255,0.12)');
-  px(ctx, 0, py + 5, bufW, 1, '#8f8a80');
-  const anchors = [
-    ...clusters.map((c) => ({ cx: c.x + c.w / 2, py: c.y + c.h / 2, pool: c.w * 0.6, h: c.h })),
-    ...decor.filter((z) => z.type === 'lounge' || z.type === 'meeting').map((z) => ({ cx: z.x + z.w / 2, py: z.y + z.h * 0.6, pool: z.w * 0.55, h: z.h })),
-  ];
-  for (const a of anchors) {
-    const cx = Math.round(a.cx);
-    const grad = ctx.createRadialGradient(cx, a.py, 2, cx, a.py, Math.max(28, a.pool));
-    // pendant pools glow stronger as it gets dark (glow rises dusk→night), so the
-    // interior reads warmly lit at night without washing out daytime.
-    grad.addColorStop(0, `rgba(255,224,150,${(0.16 + glow * 0.26).toFixed(3)})`);
-    grad.addColorStop(0.7, `rgba(255,224,150,${(0.04 + glow * 0.08).toFixed(3)})`);
-    grad.addColorStop(1, 'rgba(255,224,150,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(cx - a.pool, a.py - a.h / 2, a.pool * 2, a.h);
-    // cord + cylinder shade + glowing bulb
-    px(ctx, cx, py + 3, 1, 5, '#2b2b2b');
-    px(ctx, cx - 3, py + 8, 6, 6, '#33373f');
-    px(ctx, cx - 3, py + 8, 1, 6, '#454b55');
-    px(ctx, cx + 2, py + 8, 1, 6, '#1d2026');
-    px(ctx, cx - 2, py + 14, 4, 1, frame % 12 === 0 ? '#fff0c0' : '#ffe39a');
-  }
-}
-
 // A muted area rug under each desk cluster — grounds the team neighbourhood and
 // lets the warm wood read as the circulation path around it. Rug tone rotates
 // across a small dusty palette so adjacent teams read as distinct zones.
@@ -550,7 +623,8 @@ function syncLabels() {
       labelWrap.appendChild(el);
       nameNodes[i] = el;
     }
-    el.style.display = labelsHidden ? 'none' : 'inline-flex';
+    el.style.display = (labelsHidden || a.placeholder) ? 'none' : 'inline-flex';
+    if (a.placeholder) return; // a vacant desk has no name chip
     // Pin the chip: FOLLOW a wandering worker, else sit under the desk. This
     // per-poll pass uses the SAME rule as the per-frame draw(), so the chip never
     // flickers back to the desk for a frame when a poll lands mid-stroll.
@@ -581,9 +655,11 @@ function syncLabels() {
       // it reads plainly as the folder (not a shouty all-caps header).
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:600 8px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
-        'color:#f3ead2;text-align:center;' +
-        'text-shadow:0 1px 0 rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.10);' +
+        "font:500 7px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
+        // smaller + dimmer so the team name reads as a quiet woven-in label, not a
+        // loud header — keeps the floor + art the focus.
+        'color:rgba(238,228,205,0.46);text-align:center;' +
+        'text-shadow:0 1px 0 rgba(0,0,0,0.45);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
       labelWrap.appendChild(el);
       repoNodes[i] = el;
@@ -666,6 +742,7 @@ function syncHiddenChip() {
 let world = null;
 let recenterBtn = null;           // shared #recenter button (CSS hides it until .show)
 const cam = { x: 0, y: 0, s: 1 }; // s multiplies the UPSCALE base
+let focusBX = 0, focusBY = 0;     // centre of the desk bullpen (the default camera focus)
 let userMoved = false;            // once the user pans/zooms, stop auto-fitting
 let reservedRight = 0;            // px reserved on the right for the hovering panel
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -686,6 +763,7 @@ export function setReservedRight(px) {
 // /api/state polls (the agent objects are replaced each poll).
 let selectedKey = null;           // the clicked desk (persistent highlight)
 let hoverKey = null;              // the desk under the cursor (transient)
+let lastInspectAgent = null;      // agent the avatar is walking past (E opens it)
 const keyOf = (a) => a ? (a.sessionId || (a.pid != null ? `pid:${a.pid}` : null)) : null;
 
 function viewportRect() {
@@ -713,6 +791,7 @@ function applyCam() {
   // CSS hides #recenter until .show; reveal it once the user has panned/zoomed
   // so the affordance isn't permanently invisible.
   if (recenterBtn) recenterBtn.classList.toggle('show', userMoved);
+  positionOverlays(); // re-pin tooltip/card so they track pan/zoom/follow immediately
 }
 
 // The camera always CONFINES the office to the visible floor (the area left of the
@@ -726,10 +805,8 @@ function clampPan() {
   cam.y = h >= vp.height ? clampN(cam.y, vp.height - h, 0) : Math.round((vp.height - h) / 2);
 }
 
-// The COVER fit — the zoom at which the office FILLS the visible floor (the area
-// left of the panel) on BOTH axes, cropping the longer one. We bound zoom-out to
-// this (the LARGER of the two ratios → limited by the office's smaller dimension)
-// so the office always fills the frame and we never see void / letterbox bars.
+// The COVER fit — the zoom at which the office FILLS the visible floor on BOTH axes,
+// cropping the longer one. This is the DEFAULT framing (a full, no-void view).
 // Capped at native 3x so a tiny floor isn't blown up absurdly.
 function coverScale() {
   const vp = viewportRect();
@@ -737,10 +814,28 @@ function coverScale() {
   return clampN(Math.max(availW / (bufW * UPSCALE), vp.height / (bufH * UPSCALE)), 0.05, 3);
 }
 
-// Default view = the cover fit: the most zoomed-out you can be without void. From
-// here you can only zoom IN; clampPan keeps the office covering the frame.
+// The CONTAIN fit — the zoom at which the WHOLE office is visible (the smaller of the
+// two ratios → limited by the office's LARGER dimension), with void around the short
+// axis. This is the soft zoom-OUT floor: from the cover default you can keep pulling
+// back past it (×0.85 leaves a little breathing margin) until the entire floor fits,
+// instead of being hard-stopped at cover. clampPan centres the office in the void.
+function containScale() {
+  const vp = viewportRect();
+  const availW = Math.max(40, vp.width - reservedRight);
+  return clampN(Math.min(availW / (bufW * UPSCALE), vp.height / (bufH * UPSCALE)) * 0.85, 0.04, 3);
+}
+
+// Default view = the cover fit, CENTRED ON THE DESKS. Centering on the bullpen (not
+// the buffer's top-left) means a tall/portrait small office frames the desks in the
+// middle of the screen instead of pinning the empty back wall to the top and cropping
+// the desks off the bottom. clampPan still prevents any void.
 function fitView() {
   cam.s = coverScale();
+  const vp = viewportRect();
+  const availW = Math.max(40, vp.width - reservedRight);
+  const eff = UPSCALE * cam.s;
+  cam.x = availW / 2 - focusBX * eff;
+  cam.y = vp.height / 2 - focusBY * eff;
   clampPan();
   applyCam();
 }
@@ -750,8 +845,9 @@ function zoomAt(clientX, clientY, factor) {
   const pxp = clientX - vp.left, pyp = clientY - vp.top;
   const eff0 = UPSCALE * cam.s;
   const bx = (pxp - cam.x) / eff0, by = (pyp - cam.y) / eff0;
-  // can't zoom out past the cover fit (office always fills the frame, no void)
-  cam.s = clampN(cam.s * factor, coverScale(), 3);
+  // zoom-out floor is the CONTAIN fit (whole office visible), not cover — so you can
+  // pull back to see the entire floor instead of being hard-stopped at the fill view.
+  cam.s = clampN(cam.s * factor, containScale(), 3);
   const eff1 = UPSCALE * cam.s;
   cam.x = pxp - bx * eff1;
   cam.y = pyp - by * eff1;
@@ -808,9 +904,47 @@ function ensureTooltip() {
 
 function hideTooltip() { if (tooltip) tooltip.style.display = 'none'; }
 
+// The agent's LIVE buffer anchor: a wandering worker (its walker) when away from
+// the desk, else the desk itself. This is what makes hover/inspect info appear
+// beside the AGENT — following them as they roam — instead of over an empty desk.
+function agentAnchor(cell) {
+  const w = wanderers.get(keyOf(cell.agent));
+  if (w && w.phase !== 'seated') return { cx: w.x, top: w.y - 36, bot: w.y + 3 };
+  return { cx: cell.x + CELL_W / 2, top: cell.y, bot: cell.y + CELL_H };
+}
+
+// Pin the tooltip beside the agent's live anchor (above it, flipping below if
+// cramped), clamped to the viewport. Split from showTooltip so the per-frame loop
+// can re-pin it cheaply as a walker moves or the camera pans/zooms.
+function positionTooltip(cell) {
+  if (!tooltip || tooltip.style.display === 'none' || !canvas) return;
+  const an = agentAnchor(cell);
+  const rect = canvas.getBoundingClientRect();
+  const eff = UPSCALE * cam.s;
+  const cx = rect.left + an.cx * eff;
+  const topY = rect.top + an.top * eff;
+  const botY = rect.top + an.bot * eff;
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  const left = clampN(cx, tw / 2 + 4, window.innerWidth - tw / 2 - 4);
+  let top = topY - th - 8;
+  if (top < 4) top = botY + 8;
+  tooltip.style.left = Math.round(left) + 'px';
+  tooltip.style.top = Math.round(top) + 'px';
+}
+
 function showTooltip(cell) {
   ensureTooltip();
   const a = cell.agent;
+  if (a.placeholder) {
+    // a vacant desk → invite the user to hire their first agent
+    tooltip.innerHTML =
+      '<div style="font-weight:600;letter-spacing:.3px">An empty desk</div>' +
+      '<div style="opacity:.85;margin-top:2px;max-width:180px;white-space:normal">' +
+      'Start a Claude agent to see your first employee.</div>';
+    tooltip.style.display = 'block';
+    positionTooltip(cell);
+    return;
+  }
   const col = statusColor(a.activity);
   const act = ACTIVITY_TEXT[a.activity] || a.activity || 'idle';
   const task = a.task || a.chatName || a.lastPrompt || '';
@@ -824,26 +958,67 @@ function showTooltip(cell) {
     (a.model ? `<div style="opacity:.6;margin-top:1px;font-size:12px">` +
       `${escHtml(String(a.model).replace(/^claude-/, ''))}</div>` : '') +
     (task ? '<div style="opacity:.85;margin-top:1px;max-width:206px;overflow:hidden;' +
-      `text-overflow:ellipsis">“${escHtml(task)}”</div>` : '');
+      `text-overflow:ellipsis">“${escHtml(task)}”</div>` : '') +
+    (avatar && avatar.enabled ? '<div style="opacity:.5;margin-top:3px;font-size:11px">' +
+      'press E to open</div>' : '');
   tooltip.style.display = 'block';
-  // anchor above the desk (flip below if cramped), clamped to the viewport
+  positionTooltip(cell);
+}
+
+// The detail card (chat-panel #chatPanel) floats BESIDE the selected agent rather
+// than as a screen-blocking rail. office.js owns its position (it knows the camera
+// + the agent's live buffer pos); chat-panel.js owns its content. Re-pinned every
+// frame so it tracks the agent + camera. Prefers the agent's right; flips left near
+// the edge; clamps under the topbar.
+function positionDetailCard() {
+  const card = document.getElementById('chatPanel');
+  if (!card || !card.classList.contains('open')) return;
+  const cell = cells.find((c) => keyOf(c.agent) === selectedKey);
+  if (!cell) return;
+  const an = agentAnchor(cell);
   const rect = canvas.getBoundingClientRect();
   const eff = UPSCALE * cam.s;
-  const cx = rect.left + (cell.x + CELL_W / 2) * eff;
-  const topY = rect.top + cell.y * eff;
-  const botY = rect.top + (cell.y + CELL_H) * eff;
-  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
-  const left = clampN(cx, tw / 2 + 4, window.innerWidth - tw / 2 - 4);
-  let top = topY - th - 8;
-  if (top < 4) top = botY + 8;
-  tooltip.style.left = Math.round(left) + 'px';
-  tooltip.style.top = Math.round(top) + 'px';
+  const ax = rect.left + an.cx * eff;
+  const atop = rect.top + an.top * eff;
+  const cw = card.offsetWidth || 300, ch = card.offsetHeight || 240;
+  const margin = 12, gap = 22;
+  let left = ax + gap;
+  if (left + cw > window.innerWidth - margin) left = ax - gap - cw; // flip to the left
+  left = clampN(left, margin, Math.max(margin, window.innerWidth - cw - margin));
+  let top = clampN(atop - 8, 80, Math.max(80, window.innerHeight - ch - margin));
+  card.style.left = Math.round(left) + 'px';
+  card.style.top = Math.round(top) + 'px';
+}
+
+// Keep the hover tooltip + the selected detail card pinned to their agents as the
+// camera moves and walkers roam. Called from draw() (walker motion) and applyCam()
+// (pan/zoom/follow) so neither lags behind.
+function positionOverlays() {
+  if (!cells.length) return;
+  if (hoverKey) {
+    const cell = cells.find((c) => keyOf(c.agent) === hoverKey);
+    if (cell) positionTooltip(cell); else hideTooltip();
+  }
+  if (selectedKey) positionDetailCard();
+}
+
+// A highlight disc under a wandering worker who is hovered/selected — the walker
+// analogue of the desk's hover/selection ring, so the AGENT lights up (not just
+// their empty desk). Drawn before the walker so it stands on the disc.
+function drawWalkerRing(x, y, color) {
+  ctx.save();
+  ctx.globalAlpha = 0.18; ctx.fillStyle = color;
+  ctx.beginPath(); ctx.ellipse(x, y + 1, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.95; ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.ellipse(x, y + 1, 10, 3.4, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
 }
 
 // Recompute the hovered desk from a cursor point: update the cursor, the tooltip,
 // and (only on change) the hover key + an immediate repaint so the ring tracks
 // the cursor without waiting for the slow (~7.5fps) animation tick.
 function updateHover(clientX, clientY) {
+  if (avatar && avatar.enabled) return; // walk mode: avatar proximity drives the tooltip
   const cell = cellAt(clientX, clientY);
   const k = cell ? keyOf(cell.agent) : null;
   if (canvas) canvas.style.cursor = cell ? 'pointer' : 'grab';
@@ -878,10 +1053,16 @@ function attachInput() {
     down = false; canvas.style.cursor = 'grab';
     if (moved < 5) { // a clean tap selects; tapping the selected desk deselects
       const agent = agentAt(e.clientX, e.clientY);
-      const k = keyOf(agent);
-      selectedKey = (k && k === selectedKey) ? null : k;
-      draw(); // paint the selection ring now — don't wait for the slow loop tick
-      window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: selectedKey ? agent : null } }));
+      if (agent && agent.placeholder) {
+        // a vacant desk isn't a real agent — show its hover hint, don't open a card
+        const cell = cellAt(e.clientX, e.clientY);
+        if (cell) showTooltip(cell);
+      } else {
+        const k = keyOf(agent);
+        selectedKey = (k && k === selectedKey) ? null : k;
+        draw(); // paint the selection ring now — don't wait for the slow loop tick
+        window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: selectedKey ? agent : null } }));
+      }
     }
     updateHover(e.clientX, e.clientY); // re-evaluate hover at rest
   });
@@ -911,6 +1092,29 @@ function attachInput() {
   // app.js mutates window.agencyUnread between polls and fires this; re-sync the
   // per-desk unread pips (syncLabels reads window.agencyUnread directly).
   window.addEventListener('agency:unread', () => syncLabels());
+  // Selection can come from a click (here), the avatar's E key, or anywhere; keep
+  // selectedKey in sync and pin the detail card beside the agent once it has opened
+  // + measured (rAF), so it never flashes at its default corner.
+  window.addEventListener('agency:select', (e) => {
+    const a = e && e.detail && e.detail.agent;
+    selectedKey = keyOf(a);
+    requestAnimationFrame(positionDetailCard);
+  });
+  // Walk mode: the avatar fires agency:inspect as it passes desks. Surface a LIGHT
+  // tooltip beside that agent (NOT the heavy detail card) so the floor isn't blocked
+  // while wandering; E (see initOffice keydown) opens the full card for it.
+  window.addEventListener('agency:inspect', (e) => {
+    const a = e && e.detail && e.detail.agent;
+    lastInspectAgent = a || null;
+    const k = keyOf(a);
+    if (k === hoverKey) return;
+    hoverKey = k;
+    if (a) {
+      const cell = cells.find((c) => keyOf(c.agent) === k);
+      if (cell) showTooltip(cell); else hideTooltip();
+    } else hideTooltip();
+    draw();
+  });
 }
 
 // ---- floor entities: avatar (walkable player) + wandering cat ---------------
@@ -1061,8 +1265,8 @@ function updateCat(dt, now) {
   // Petting: while the walking avatar is right next to the cat, it wakes, sits
   // happily, and emits hearts (drawn in drawCat). Re-checked every tick so a
   // lingering pet keeps it awake; stepping away lets it drift back to napping.
-  cat.petted = false;
-  dog.petted = false;
+  cat.petted = (typeof window !== 'undefined' && window.__pet) || false; // reel: force the happy/hearts state
+  dog.petted = (typeof window !== 'undefined' && window.__pet) || false;
   if (avatar && avatar.enabled) {
     const pd = Math.hypot(avatar.pos.x - cat.x, avatar.pos.y - cat.y);
     if (pd < 22) {
@@ -1120,6 +1324,7 @@ function updateWanderers(dt, now) {
   for (const [, w] of wanderers) if (w.phase !== 'seated') away++;
   cells.forEach((cell) => {
     const a = cell.agent;
+    if (a.placeholder) return; // a vacant desk never wanders
     const key = keyOf(a);
     if (key == null) return;
     live.add(key);
@@ -1208,7 +1413,6 @@ function draw() {
   drawWall(ctx, bufW, WALL_H, frame, mood);
   drawFloor(ctx, bufW, TOP, bufH);
   drawDaylight(ctx, bufW, TOP, bufH, mood);
-  drawCeilingLights(mood.glow);
   drawDecor();
   drawClusterRugs();
   // --- depth-sorted floor actors: every desk (the seated worker is HIDDEN while
@@ -1218,6 +1422,7 @@ function draw() {
   const actors = [];
   cells.forEach((cell, i) => {
     const a = cell.agent;
+    const isEmpty = a.placeholder;          // a vacant desk: draw the desk, no worker
     const k = keyOf(a);
     const selected = k != null && k === selectedKey;
     const hovered = k != null && k === hoverKey && !selected;
@@ -1230,19 +1435,24 @@ function draw() {
     // front but above the cell bottom wrongly sorts behind it. Characters sort by
     // their feet (w.y / avatar.pos.y / cat.y), so this makes occlusion feet-based.
     actors.push({ y: cell.y + CELL_H - 15, fn: () => {
-      drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread, away);
-      if (a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
+      // a vacant desk hides the worker (away=true) — an empty chair + dark monitor.
+      drawCubicle(ctx, cell.x, cell.y, a, frame, selected, hovered, unread, away || isEmpty);
+      if (!isEmpty && a.role === 'lead') drawCrown(ctx, cell.x + CELL_W / 2 - 6, cell.y + 22, frame);
     } });
     if (away) {
       const seed = (a.pid | 0) || hashInt(a.sessionId || 'a'); // SAME look as the seated worker
       const moving = w.phase === 'walking' || w.phase === 'returning';
-      actors.push({ y: w.y, fn: () => drawWalker(ctx, Math.round(w.x), Math.round(w.y), { seed, frame, walking: moving }) });
+      const ring = selected ? '#ffd166' : hovered ? '#5cd0ff' : null; // gold = selected, cyan = hover
+      actors.push({ y: w.y, fn: () => {
+        if (ring) drawWalkerRing(Math.round(w.x), Math.round(w.y), ring);
+        drawWalker(ctx, Math.round(w.x), Math.round(w.y), { seed, frame, walking: moving });
+      } });
     }
     // the name chip follows a wandering worker; otherwise it sits under the desk
     const node = nameNodes[i];
     if (node) {
-      node.style.display = labelsHidden ? 'none' : 'inline-flex';
-      if (!labelsHidden) {
+      node.style.display = (labelsHidden || isEmpty) ? 'none' : 'inline-flex';
+      if (!labelsHidden && !isEmpty) {
         if (away) { node.style.left = Math.round(w.x) + 'px'; node.style.top = Math.round(w.y - 46) + 'px'; }
         else { node.style.left = (cell.x + CELL_W / 2) + 'px'; node.style.top = (cell.y + CELL_H - 10) + 'px'; }
       }
@@ -1261,6 +1471,8 @@ function draw() {
     const a = cell.agent;
     if (a.needsYou || a.awaitingReply) drawNeedsYou(ctx, cell.x, cell.y, frame); // whole-desk amber treatment
   }
+
+  positionOverlays(); // keep the hover tooltip + detail card pinned beside their agents
 }
 
 // ---- public API ------------------------------------------------------------
@@ -1288,11 +1500,18 @@ export function initOffice(canvasEl, _labels) {
   ensureWalkUI();
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k !== 'g' && k !== 'n') return;
+    const isOpen = k === 'e' || e.key === 'Enter';
+    if (k !== 'g' && k !== 'n' && !isOpen) return;
     const t = e.target; // don't fire while typing in the chat panel
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (k === 'g') toggleWalk();
-    else toggleLabels();
+    else if (k === 'n') toggleLabels();
+    else if (isOpen && avatar && avatar.enabled && lastInspectAgent) {
+      // open the full detail card for the agent we're standing next to
+      selectedKey = keyOf(lastInspectAgent);
+      draw();
+      window.dispatchEvent(new CustomEvent('agency:select', { detail: { agent: lastInspectAgent } }));
+    }
   });
 }
 
@@ -1306,6 +1525,9 @@ export function init(canvasEl, n, seed) {
 let started = false;
 let lastAll = [];        // last full agent set (pre hidden-filter), so the "show"
 let showHidden = false;  // toggle can re-reveal hidden desks without a fresh poll
+// A single VACANT desk shown when the floor is empty (no agents). Flows through the
+// normal layout as one cell; the renderer draws an empty desk + a hover hint.
+const EMPTY_DESK = { placeholder: true, project: '', name: '', activity: 'idle', model: '', sessionId: '__vacant__', pid: null, subagents: [], role: null };
 let hiddenCount = 0;
 
 const isActive = (a) => a.activity === 'working' || a.activity === 'shell';
@@ -1321,7 +1543,12 @@ const agentOrder = (a, b) =>
 // Shared by setAgents (new poll) and the "N away · show" toggle (no poll).
 function rebuild() {
   hiddenCount = lastAll.reduce((n, a) => n + (a.hidden ? 1 : 0), 0);
-  agents = showHidden ? lastAll.slice() : lastAll.filter((a) => !a.hidden);
+  const visible = showHidden ? lastAll.slice() : lastAll.filter((a) => !a.hidden);
+  // No agents → show ONE vacant desk (the snug 1-desk office, just empty) so an empty
+  // floor reads as "your office, awaiting your first hire" instead of a bare room.
+  // The placeholder flows through the normal layout; the draw loop + tooltip special-
+  // case it (no worker, a hover hint).
+  agents = visible.length ? visible : [EMPTY_DESK];
   plan();
   canvas.width = bufW;
   canvas.height = bufH;

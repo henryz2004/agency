@@ -126,11 +126,30 @@ export const MOODS = {
   dusk:  { wall: '#e4cdb2', sky: ['#f3a05e', '#f8cf94'], wash: ['rgba(255,165,85,0.20)', 'rgba(255,150,95,0.06)', 'rgba(58,24,12,0.24)'], glow: 0.6 },
   night: { wall: '#3a3f55', sky: ['#16223f', '#283a5e'], wash: ['rgba(28,42,82,0.34)', 'rgba(22,32,62,0.22)', 'rgba(8,12,30,0.42)'], glow: 1.0 },
 };
+// Continuous time-of-day mood: interpolate between anchor moods so the lighting
+// glides smoothly across the day instead of snapping between four states. Integer
+// hours (the live app) land on sensible values; fractional hours (a time-lapse)
+// get a smooth gradient.
+const _hx = (c) => { c = c.replace('#', ''); return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)]; };
+const _lerp = (a, b, t) => a + (b - a) * t;
+const _toHex = (r, g, b) => '#' + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const _lerpHex = (a, b, t) => { const x = _hx(a), y = _hx(b); return _toHex(_lerp(x[0], y[0], t), _lerp(x[1], y[1], t), _lerp(x[2], y[2], t)); };
+const _rgba = (s) => (s.match(/[\d.]+/g) || [0, 0, 0, 0]).map(Number);
+const _lerpRgba = (a, b, t) => { const x = _rgba(a), y = _rgba(b); return `rgba(${Math.round(_lerp(x[0], y[0], t))},${Math.round(_lerp(x[1], y[1], t))},${Math.round(_lerp(x[2], y[2], t))},${_lerp(x[3] || 0, y[3] || 0, t).toFixed(3)})`; };
+const _lerpMood = (A, B, t) => ({
+  wall: _lerpHex(A.wall, B.wall, t),
+  sky: [_lerpHex(A.sky[0], B.sky[0], t), _lerpHex(A.sky[1], B.sky[1], t)],
+  wash: [_lerpRgba(A.wash[0], B.wash[0], t), _lerpRgba(A.wash[1], B.wash[1], t), _lerpRgba(A.wash[2], B.wash[2], t)],
+  glow: _lerp(A.glow, B.glow, t),
+});
+const _MOOD_KEYS = [[0, MOODS.night], [6, MOODS.night], [8, MOODS.dawn], [10.5, MOODS.day], [16, MOODS.day], [18.5, MOODS.dusk], [20.5, MOODS.night], [24, MOODS.night]];
 export function moodForHour(h) {
-  if (h >= 6 && h < 9) return MOODS.dawn;
-  if (h >= 9 && h < 17) return MOODS.day;
-  if (h >= 17 && h < 20) return MOODS.dusk;
-  return MOODS.night; // 20:00–06:00
+  h = ((h % 24) + 24) % 24;
+  for (let i = 0; i < _MOOD_KEYS.length - 1; i++) {
+    const [h0, m0] = _MOOD_KEYS[i], [h1, m1] = _MOOD_KEYS[i + 1];
+    if (h >= h0 && h <= h1) return _lerpMood(m0, m1, (h - h0) / (h1 - h0));
+  }
+  return MOODS.night;
 }
 
 export function drawWall(ctx, bufW, wallH, frame, mood = MOODS.day) {
@@ -148,22 +167,25 @@ export function drawWall(ctx, bufW, wallH, frame, mood = MOODS.day) {
   ctx.fillRect(0, wy + 3, bufW, 2);
 
   // --- wall hangings: clock, pictures, glass board, windows ---
-  // windows tiled across, skipping a centre band for the clock/board
+  // Reserve the FIXED features' x-ranges first, then tile windows ONLY where they
+  // don't collide — so a narrow wall naturally shows fewer windows (down to one on
+  // a 1-desk office) and the glass board never lands on top of a window.
   const winY = wy + 14, winW = 26, winH = 32;
-  for (let x = 40, k = 0; x < bufW - 40; x += 64, k++) {
-    // leave a gap mid-wall for the clock + board
-    if (x > bufW * 0.38 && x < bufW * 0.58) continue;
+  const clockX = Math.round(bufW * 0.46);
+  const boardX = Math.round(bufW * 0.5) + 8, boardW = 40;
+  const occupied = [
+    [8, 38],                           // framed picture + calendar (upper-left)
+    [clockX - 4, clockX + 14],         // wall clock
+    [boardX - 3, boardX + boardW + 3], // glass board
+  ];
+  for (let x = 40; x < bufW - 36; x += 64) {
+    if (occupied.some(([a, b]) => x + winW > a && x < b)) continue; // would overlap a feature
     drawWindow(ctx, x, winY, winW, winH, frame, mood.sky);
   }
-  // wall clock high-centre
-  drawClock(ctx, Math.round(bufW * 0.46), wy + 16, frame);
-  // upper-left corner: a framed landscape picture with the calendar tucked neatly
-  // beneath it (stacked + left-aligned). Both sit left of x≈30, clear of the window
-  // row that starts at x≈40 — so the calendar no longer overlaps the first window.
-  drawPicture(ctx, 14, wy + 18);
-  drawCalendar(ctx, 15, wy + 34);
-  // a small green glass whiteboard centre-right
-  drawGlassBoard(ctx, Math.round(bufW * 0.5) + 8, wy + 16);
+  drawClock(ctx, clockX, wy + 16, frame);              // wall clock
+  drawPicture(ctx, 14, wy + 18);                       // framed landscape, upper-left
+  drawCalendar(ctx, 15, wy + 34);                      // calendar tucked beneath it
+  drawGlassBoard(ctx, boardX, wy + 16);               // small green glass whiteboard
 
   // --- wood rail + baseboard at the bottom of the wall ---
   ctx.fillStyle = '#b07c44';
@@ -486,33 +508,157 @@ function drawMonitor(ctx, x, y, tier, agent, seed, frame) {
   px(ctx, x, y, mw, mh, '#0d0f14');
   const typing = agent.activity === 'working';
   const shellRunning = agent.activity === 'shell';
-  // screen fill
-  if (typing) px(ctx, x + 1, y + 1, mw - 2, mh - 2, shade(tier.screen, -16));
-  else if (shellRunning) px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b130d');
-  else px(ctx, x + 1, y + 1, mw - 2, mh - 2, '#0b0e14'); // idle → screen OFF (dark glass, no tier tint)
-  // content
+  // The lit inner glass. (sx, sy) = top-left of usable pixels, sw × sh = its size.
+  const sx = x + 1, sy = y + 1, sw = mw - 2, sh = mh - 2;
   if (typing) {
-    const r = rng(seed * 31 + frame);
-    for (let i = 0; i < 5; i++) {
-      const ly = y + 2 + Math.floor(r() * (mh - 4));
-      const lx = x + 2 + Math.floor(r() * 3);
-      const lw = 2 + Math.floor(r() * 10);
-      px(ctx, lx, ly, Math.min(lw, mw - 3 - (lx - x)), 1, tier.code);
-    }
+    px(ctx, sx, sy, sw, sh, shade(tier.screen, -178)); // deep tier-tinted glass
+    // Deterministic content style per agent (a given agent always shows the same
+    // app): code editor, terminal, diff, or a tiny dashboard.
+    const style = shellRunning ? 1 : hashInt('mon' + seed) % 4;
+    if (style === 0) drawScreenEditor(ctx, sx, sy, sw, sh, tier, seed, frame);
+    else if (style === 1) drawScreenTerminal(ctx, sx, sy, sw, sh, tier, seed, frame);
+    else if (style === 2) drawScreenDiff(ctx, sx, sy, sw, sh, tier, seed, frame);
+    else drawScreenChart(ctx, sx, sy, sw, sh, tier, seed, frame);
   } else if (shellRunning) {
-    for (let i = 0; i < 4; i++) {
-      const ly = y + 2 + ((i * 3 + frame) % (mh - 3));
-      const lw = 3 + (hashInt('t' + seed + i) % 9);
-      px(ctx, x + 2, ly, Math.min(lw, mw - 4), 1, '#8bd450');
-    }
-    if (frame % 2) px(ctx, x + 2, y + mh - 3, 2, 1, '#8bd450');
-  } else { // idle: no content — just a faint glass reflection so it reads "off"
+    px(ctx, sx, sy, sw, sh, '#0b130d'); // shell → dark green glass
+    drawScreenTerminal(ctx, sx, sy, sw, sh, tier, seed, frame);
+  } else { // idle: screen OFF — dark glass + a faint reflection so it reads "off"
+    px(ctx, sx, sy, sw, sh, '#0b0e14');
     px(ctx, x + 2, y + 2, 1, mh - 4, 'rgba(255,255,255,0.06)');
     px(ctx, x + 4, y + 3, 1, mh - 6, 'rgba(255,255,255,0.03)');
   }
   // stand
   px(ctx, x + (mw >> 1) - 1, y + mh, 3, 3, '#3a4150');
   px(ctx, x + (mw >> 1) - 4, y + mh + 3, 9, 2, '#2b313e');
+}
+
+// --- monitor screen content -------------------------------------------------
+// All four renderers fill the inner glass (sx, sy, sw, sh) and never spill past
+// it. They lay out on a fixed 2px line grid so rows never overlap, vary length /
+// color / indent deterministically from `seed`, and animate gently via `frame`.
+// `LH` = line height (1px text + 1px gap); the syntax palette mixes tier.code
+// with muted accents so a row of code reads as keywords/strings/idents.
+
+const LH = 2; // px per text line (1px glyph + 1px gap)
+
+// A 1px window-chrome title strip across the top of an app screen: a slightly
+// lighter bar with two tiny "window dots", so editor/terminal/diff read as real
+// app windows. Returns the y where content should begin (1px below the bar).
+function drawScreenChrome(ctx, sx, sy, sw, tier) {
+  px(ctx, sx, sy, sw, 1, 'rgba(255,255,255,0.10)'); // title bar
+  px(ctx, sx + 1, sy, 1, 1, shade(tier.screen, 30)); // left "tab/dot"
+  px(ctx, sx + 3, sy, 1, 1, 'rgba(255,255,255,0.28)');
+  return sy + 1; // content starts on the next row
+}
+
+// A believable code editor: a title bar, a gutter of line numbers, then indented
+// code lines whose token runs alternate color (keyword / ident / string), plus a
+// caret on the active line that blinks and steps down a line every few frames.
+function drawScreenEditor(ctx, sx, sy, sw, sh, tier, seed, frame) {
+  const kw = shade(tier.screen, 50);      // "keyword" — bright tier hue
+  const ident = tier.code;                 // identifiers — light text
+  const str = '#e0a35d';                   // strings — warm
+  const gut = 'rgba(255,255,255,0.20)';    // gutter line numbers
+  const cy0 = drawScreenChrome(ctx, sx, sy, sw, tier);
+  const rows = Math.floor((sy + sh - cy0) / LH);
+  const gw = 3;                            // gutter width (room for a 2px digit)
+  // gutter background tick marks (one faint 1px "line number" per row)
+  for (let i = 0; i < rows; i++) px(ctx, sx + 1, cy0 + i * LH, 1, 1, gut);
+  // a slow vertical scroll so new code drifts up over time
+  const scroll = Math.floor(frame / 24);
+  const active = (frame >> 1) % rows;       // the line the caret sits on
+  let caretX = sx + gw + 1;
+  for (let i = 0; i < rows; i++) {
+    const rr = rng(seed * 17 + (i + scroll) * 131 + 7);
+    const indent = (Math.floor(rr() * 3)) * 2;        // 0 / 2 / 4 px indent
+    let cx = sx + gw + 1 + indent;
+    const lineRight = sx + sw - 1;
+    // 1–3 token runs of alternating color across the row
+    const tokens = 1 + Math.floor(rr() * 3);
+    const palette = [kw, ident, str];
+    for (let t = 0; t < tokens && cx < lineRight; t++) {
+      const tw = 2 + Math.floor(rr() * 4);
+      const w = Math.min(tw, lineRight - cx);
+      if (w > 0) px(ctx, cx, cy0 + i * LH, w, 1, palette[(t + i) % 3]);
+      cx += w + 1; // 1px space between tokens
+    }
+    if (i === active) caretX = Math.min(cx, lineRight); // caret follows the code
+  }
+  // blinking caret on the active line
+  if (frame % 2) px(ctx, caretX, cy0 + active * LH, 1, 1, '#ffffff');
+}
+
+// A terminal: a title strip, "$" prompt lines + output that scroll up as a new
+// line is appended, with a blinking block caret on the active prompt.
+function drawScreenTerminal(ctx, sx, sy, sw, sh, tier, seed, frame) {
+  const green = '#8bd450', dim = 'rgba(139,212,80,0.55)', warn = '#e0a35d';
+  const cy0 = drawScreenChrome(ctx, sx, sy, sw, tier);
+  const rows = Math.floor((sy + sh - cy0) / LH);
+  const right = sx + sw - 1;
+  // which output line is the newest (it grows, mimicking a command printing)
+  const tick = Math.floor(frame / 16);
+  for (let i = 0; i < rows - 1; i++) {
+    const rr = rng(seed * 23 + (i + tick) * 97 + 3);
+    const isPrompt = rr() < 0.34;
+    let cx = sx + 1;
+    if (isPrompt) { px(ctx, cx, cy0 + i * LH, 1, 1, green); cx += 2; } // "$"
+    // output run: length varies; the bottom-most line "types in" with frame
+    let lw = 3 + Math.floor(rr() * 9);
+    if (i === rows - 2) lw = 2 + (Math.floor(frame / 4) % 11);
+    const w = Math.min(lw, right - cx);
+    if (w > 0) px(ctx, cx, cy0 + i * LH, w, 1, isPrompt ? green : (rr() < 0.3 ? warn : dim));
+  }
+  // active prompt + blinking block caret on the last row
+  const ly = cy0 + (rows - 1) * LH;
+  px(ctx, sx + 1, ly, 1, 1, green);
+  if (frame % 2) px(ctx, sx + 3, ly, 2, 1, green);
+}
+
+// A diff view: a title strip, a red/green change gutter and corresponding +/-
+// lines, like a review pane. Lines hold their color (add=green, del=red, ctx=dim).
+function drawScreenDiff(ctx, sx, sy, sw, sh, tier, seed, frame) {
+  const add = '#4caf6a', addg = '#2e6b42', del = '#c0473a', delg = '#7a2e26';
+  const ctxt = 'rgba(255,255,255,0.28)';
+  const cy0 = drawScreenChrome(ctx, sx, sy, sw, tier);
+  const rows = Math.floor((sy + sh - cy0) / LH);
+  const scroll = Math.floor(frame / 30);
+  for (let i = 0; i < rows; i++) {
+    const rr = rng(seed * 29 + (i + scroll) * 113 + 11);
+    const k = rr();
+    const kind = k < 0.4 ? 'add' : (k < 0.7 ? 'del' : 'ctx');
+    const gutc = kind === 'add' ? addg : kind === 'del' ? delg : 'transparent';
+    const txtc = kind === 'add' ? add : kind === 'del' ? del : ctxt;
+    if (gutc !== 'transparent') px(ctx, sx + 1, cy0 + i * LH, 1, 1, gutc); // change bar
+    const indent = (Math.floor(rr() * 3)) * 2;
+    const cx = sx + 3 + indent;
+    const lw = 3 + Math.floor(rr() * 8);
+    const w = Math.min(lw, sx + sw - 1 - cx);
+    if (w > 0) px(ctx, cx, cy0 + i * LH, w, 1, txtc);
+  }
+}
+
+// A tiny dashboard: a title strip, then a small live bar chart whose bars sway
+// gently with frame — reads as a metrics/monitoring screen.
+function drawScreenChart(ctx, sx, sy, sw, sh, tier, seed, frame) {
+  const bar = shade(tier.screen, 30), tip = tier.code;
+  const top = drawScreenChrome(ctx, sx, sy, sw, tier);
+  // baseline
+  const base = sy + sh - 1;
+  px(ctx, sx + 1, base, sw - 2, 1, 'rgba(255,255,255,0.18)');
+  const bw = 2, gap = 1;
+  const maxH = base - top - 1;
+  let bx = sx + 2;
+  let i = 0;
+  while (bx + bw <= sx + sw - 1) {
+    const phase = (frame * 0.18) + i * 1.1 + (hashInt('bar' + seed) % 7);
+    const norm = 0.35 + 0.55 * (0.5 - 0.5 * Math.cos(phase)); // 0.35..0.9, swaying
+    const h = Math.max(1, Math.round(maxH * norm));
+    const by = base - h;
+    px(ctx, bx, by, bw, h, bar);
+    px(ctx, bx, by, bw, 1, tip); // bright cap
+    bx += bw + gap;
+    i++;
+  }
 }
 
 function drawDeskProp(ctx, x, baseY, seed, frame) {

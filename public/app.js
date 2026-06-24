@@ -4,7 +4,8 @@
 
 import { initOffice, setAgents } from './office.js';
 import { drawHead, colorFor } from './sprites.js';
-import { initSoundPref, toggleSound, updateSound } from './sound.js';
+import { updateSound } from './sound.js';
+import { initAudioControls } from './audio-controls.js';
 import { initUI } from './ui.js';
 import { mockEnabled, getMockState } from './mock.js';
 import { initChatPanel } from './chat-panel.js';
@@ -634,12 +635,27 @@ function renderManpower() {
   const teamSize = avgDailyOut / perEngDay; // effective FTEs at recent pace
   const engYears = (usage.lifetime.out || 0) / perEngYear;
   const payroll = engYears * assume.sal;
-  const engDaysToday = (usage.today.out || 0) / perEngDay;
+  const todayOut = usage.today ? usage.today.out || 0 : 0;
+  const engDaysToday = todayOut / perEngDay; // engineer-days produced today
 
   $('hcNum').textContent = teamSize.toFixed(1);
   $('mEngYears').textContent = engYears >= 1 ? engYears.toFixed(1) : engYears.toFixed(2);
   $('mPayroll').textContent = money(payroll);
   $('mToday').textContent = engDaysToday.toFixed(engDaysToday >= 10 ? 0 : 1);
+
+  // TODAY headline: "shipped like a team of N engineers today". N = today's
+  // engineer-days (one engineer's full workday = 1), so it reads as a team size.
+  // Today's dollars = engineer-days today * per-workday pay. All recomputed here
+  // so the assumption sliders update it live alongside the rest of the card.
+  const tdTeamEl = $('tdTeam');
+  if (tdTeamEl) tdTeamEl.textContent = Math.max(0, Math.round(engDaysToday));
+  const tdTokensEl = $('tdTokens');
+  if (tdTokensEl) tdTokensEl.textContent = fmt(todayOut);
+  const tdPayEl = $('tdPay');
+  if (tdPayEl) {
+    const dollarsPerWorkday = assume.days > 0 ? assume.sal / assume.days : 0;
+    tdPayEl.textContent = money(engDaysToday * dollarsPerWorkday);
+  }
 
   updatePayrollRate(avgDailyOut, perEngDay);
 
@@ -848,11 +864,13 @@ function renderDepts(usage) {
     const barW = max ? (100 * (metric === 'recentOut' ? e.recentOut : val)) / max : 0;
     const row = document.createElement('div');
     row.className = 'dept-row';
+    // Lead with the token number so the value reads as TOKEN OUTPUT (the thing
+    // sizing the bar). Meta line trimmed to sessions · actions for density.
     row.innerHTML = `
       <div class="dept-head"><span class="dept-name">${liveTag}${escapeHtml(e.project)}</span>
-        <span class="dept-val">${fmt(val)}${valNote}</span></div>
+        <span class="dept-val">${fmt(val)}<span class="dept-unit"> tok</span>${valNote}</span></div>
       <div class="dept-bar"><div class="dept-fill" style="width:${barW}%"></div></div>
-      <div class="dept-meta">${e.sessions} sessions · ${fmt(e.tools)} actions · ${e.agents} subagents</div>`;
+      <div class="dept-meta">${e.sessions} sessions · ${fmt(e.tools)} actions</div>`;
     list.appendChild(row);
   });
 
@@ -980,29 +998,11 @@ bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
   setView(readPref());
 })();
 
-// ---- sound toggle ---------------------------------------------------------
-// Pref is read at load (no audio yet); the AudioContext is created/resumed only
-// inside the click handler (a user gesture). Defaults to OFF.
-(function wireSound() {
-  const btn = $('soundToggle');
-  if (!btn) return;
-  function paint(on) {
-    btn.textContent = on ? '🔊' : '🔇';
-    btn.classList.toggle('on', on);
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  }
-  // The button reflects the ACTUAL audio state, which is OFF on load: the browser
-  // won't run audio until a user gesture, so a saved "on" pref can't honestly show
-  // as active yet (it's honored on the first click by toggleSound). We still LOAD
-  // the pref so that first click resumes — we just don't paint the button active
-  // while it's silent.
-  initSoundPref();
-  paint(false);
-  btn.addEventListener('click', () => {
-    const on = toggleSound(); // creates/resumes AudioContext on first enable
-    paint(on);
-  });
-})();
+// ---- audio controls -------------------------------------------------------
+// Two independent channels (music + SFX) with a now-playing label, mounted into
+// the topbar. Self-contained in audio-controls.js; AudioContext is created/resumed
+// only on a user gesture (a toggle click), per browser autoplay rules.
+initAudioControls();
 
 window.addEventListener('resize', () => {
   if (STATE) {

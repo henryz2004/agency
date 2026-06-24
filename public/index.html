@@ -42,8 +42,7 @@
       </div>
       <div class="topctrls">
         <div class="live-pill"><span class="rec"></span> LIVE</div>
-        <button id="soundToggle" class="sound-toggle" type="button" aria-pressed="false" title="Toggle office sound">🔇</button>
-        <button id="panelToggle" class="panel-toggle active" type="button" title="Toggle stats panel">📊</button>
+        <button id="panelToggle" class="panel-toggle" type="button" title="Toggle stats panel">📊</button>
       </div>
     </div>
   </header>
@@ -95,10 +94,22 @@
         </div>
       </div>
 
-      <!-- ===== ANALYTICS: windowed / historical view (relocated unchanged) ===== -->
+      <!-- ===== ANALYTICS: windowed / historical view ===== -->
       <div class="view-analytics hidden" id="viewAnalytics">
+      <!-- TODAY: the prominent "shipped like a team of X today" framing, recomputed
+           live by renderManpower() so the assumption sliders update it instantly. -->
+      <div class="card today-card">
+        <div class="card-title">Today <span class="card-title-hint" id="todayHint">resets at midnight</span></div>
+        <div class="today-line">Today you shipped like a team of</div>
+        <div class="bignum"><span id="tdTeam">0</span><span class="bignum-unit">engineers</span></div>
+        <div class="today-grid">
+          <div><div class="td-k" id="tdTokens">0</div><div class="td-l">output tokens today</div></div>
+          <div><div class="td-k" id="tdPay">$0</div><div class="td-l">payroll-equivalent today</div></div>
+        </div>
+      </div>
+
       <div class="card headcount-card">
-        <div class="card-title">Effective team size</div>
+        <div class="card-title">Effective team size <span class="card-title-hint">recent pace</span></div>
         <div class="bignum"><span id="hcNum">0.0</span><span class="bignum-unit">engineers</span></div>
         <div class="card-note">your recent daily output vs one human's</div>
         <div class="payroll-meter">
@@ -141,7 +152,7 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Departments <span class="card-title-hint" id="deptHint">active · last 7d</span></div>
+        <div class="card-title">Output by project <span class="card-title-hint" id="deptHint">active · last 7d</span></div>
         <div id="deptList" class="deptlist"></div>
       </div>
 
