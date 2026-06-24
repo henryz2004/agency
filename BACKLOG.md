@@ -11,7 +11,7 @@ never-phones-home design is the opposite of what this needs.
 **Status (2026-06-24):** launch video done — built with HyperFrames, kept on the
 `launch-reel` branch (`reel/`; re-render via `reel/hyperframes`, details in
 `reel/README.md`). `npx` install shipped (package
-`claude-agency`, bin `agency`; state moved to `~/.agency` via `lib/paths.js`;
+`@henryz2004/agency`, bin `agency`; state moved to `~/.agency` via `lib/paths.js`;
 auto-opens browser) — NOT yet `npm publish`ed (pick name + `npm login` first).
 Leaderboard slice **built**: standardized-eng-years metric (`public/metric.js`,
 locked constants), Cloudflare Worker + D1 backend (`worker/`), opt-in client UI

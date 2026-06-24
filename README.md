@@ -17,7 +17,7 @@ Nothing leaves your machine — unless you explicitly opt into the [leaderboard]
 ## Run it
 
 ```bash
-npx claude-agency
+npx @henryz2004/agency
 # → opens http://localhost:4313 in your browser
 ```
 
