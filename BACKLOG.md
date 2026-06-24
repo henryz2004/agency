@@ -8,7 +8,9 @@ The vision: ship Agency to the public, self-installable, to view your AI agents
 "as employees" — then a social layer on top. Big shift: today's local, read-only,
 never-phones-home design is the opposite of what this needs.
 
-**Status (2026-06-24):** launch video done. `npx` install shipped (package
+**Status (2026-06-24):** launch video done — built with HyperFrames, kept on the
+`launch-reel` branch (`reel/`; re-render via `reel/hyperframes`, details in
+`reel/README.md`). `npx` install shipped (package
 `claude-agency`, bin `agency`; state moved to `~/.agency` via `lib/paths.js`;
 auto-opens browser) — NOT yet `npm publish`ed (pick name + `npm login` first).
 Leaderboard slice **built**: standardized-eng-years metric (`public/metric.js`,
@@ -29,9 +31,16 @@ deploy the Worker + flip on the URL; then "view other offices" + virtual city.
 - **View other offices** — visit other people's floors (read-only, consented).
 - **Virtual city** — each office is one building; the city is a zoom-out over the same
   renderer. Don't build it before one office is delightful.
-- **Launch video** — the single-player polish IS the trailer: agents as employees, idle
-  ones go dark & wander, the lead's crown, the live token burn. Needs life on the floor
-  (idle-wander) + a busy floor.
+- **Launch video** — ✅ built (branch `launch-reel`, `reel/`; not on `main`). ~37s
+  HyperFrames cut: black → AGENCY logo → "your AI agents, as pixel characters" →
+  "scale your team" (office grows 1→many) → crowned lead → helper-swarm → walk-the-floor
+  (avatar + per-desk tooltips) → cat/dog quick cut → live data scene (tokens/model-mix) →
+  continuous day/night time-lapse (idle agents get up and wander) → end lockup over a
+  fade-to-black. Office footage is captured headless from the real `office.js`;
+  iterate timing/copy/layout by editing `reel/hyperframes/index.html` and re-rendering
+  (`npx hyperframes render`) — no re-capture needed. Reel-scoped office hooks
+  (continuous `moodForHour`; `window.__cat`/`__dog`/`__pet`) are documented in
+  `reel/README.md`.
 
 _Sequencing:_ nail the single-player core first (current rounds) — it's both what people
 install and the video. Social/city is Phase 2 on a backend.
