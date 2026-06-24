@@ -649,17 +649,16 @@ function syncLabels() {
     let el = repoNodes[i];
     if (!el) {
       el = document.createElement('div');
-      // "Sewn into the carpet": no chip background — cream thread-colored text
-      // with an embossed/stitched shadow, sitting on the rug's top strip so the
-      // team name reads as woven into the fabric. Lowercase + a trailing slash so
-      // it reads plainly as the folder (not a shouty all-caps header).
+      // "Stamped INTO the carpet": a DEBOSSED label, not text floating on top. The
+      // glyphs are a dark recess (semi-transparent black, so it darkens whatever rug
+      // tone it sits on) with a 1px light lower lip — the classic engraved/letterpress
+      // cue, so the team name reads as pressed into the fabric. Lowercase + trailing
+      // slash so it reads plainly as the folder.
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
-        "font:500 7px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
-        // smaller + dimmer so the team name reads as a quiet woven-in label, not a
-        // loud header — keeps the floor + art the focus.
-        'color:rgba(238,228,205,0.46);text-align:center;' +
-        'text-shadow:0 1px 0 rgba(0,0,0,0.45);' +
+        "font:600 7px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
+        'color:rgba(8,6,4,0.42);text-align:center;' +
+        'text-shadow:0 1px 0 rgba(255,255,255,0.16);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
       labelWrap.appendChild(el);
       repoNodes[i] = el;
