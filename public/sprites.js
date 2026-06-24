@@ -104,9 +104,14 @@ export function drawHead(ctx, x, y, { skin = '#f0c8a0', hair = '#2b2233', shirt 
 }
 
 // Skin / hair / shirt variety palettes — warm and varied but harmonious.
-const SKINS = ['#f2cda4', '#e8b88a', '#d49a6a', '#b87a4e', '#a86a44', '#8a5a3c'];
-const HAIRS = ['#2b2233', '#4a3326', '#6b4a2e', '#8a5a30', '#c98a3a', '#9a9aa6', '#1d1d24', '#5a2d2d'];
-const SHIRTS = ['#d9694f', '#5d9ce0', '#5dc98a', '#e0b05d', '#a87de0', '#5dc9c9', '#e07db0', '#c0584f', '#4f8fb0'];
+// Exported so scripts/charsheet.mjs can enumerate the full appearance space.
+export const SKINS = ['#ffe0bd', '#f2cda4', '#e8b88a', '#d49a6a', '#b87a4e', '#a86a44', '#8a5a3c', '#6b4426'];
+export const HAIRS = ['#2b2233', '#4a3326', '#6b4a2e', '#8a5a30', '#c98a3a', '#9a9aa6', '#1d1d24', '#5a2d2d',
+  '#b5532a', '#e6c878', '#e07db0', '#5d7de0', '#3aa6a0', '#d8d8e0']; // + ginger, blonde, pink, blue, teal, silver
+export const SHIRTS = ['#d9694f', '#5d9ce0', '#5dc98a', '#e0b05d', '#a87de0', '#5dc9c9', '#e07db0', '#c0584f', '#4f8fb0',
+  '#7d8a3a', '#3a6f8a', '#8a8f99', '#d97f3a', '#6f5dc9']; // + olive, steel, grey, orange, indigo
+export const HAIR_STYLES = 7; // distinct hairStyle values — see drawHeadFace's switch
+export const TOPS = 6;        // distinct clothing styles — see drawTorso
 
 // ---- the back wall ---------------------------------------------------------
 // A textured cream plaster wall (no sky — wall fills the whole band from the top
@@ -304,13 +309,14 @@ export function drawDaylight(ctx, bufW, top, bufH, mood = MOODS.day) {
 // Deterministic per-seed appearance (skin / hair / shirt / style / glasses /
 // beard). Extracted so the seated worker and the standing walker derive the SAME
 // look from a seed — keep the draw ORDER below so existing seeds are unchanged.
-function personLook(seed) {
+export function personLook(seed) {
   const vr = rng(seed * 2654435761 + 7);
   return {
     skin: SKINS[Math.floor(vr() * SKINS.length)],
     hair: HAIRS[Math.floor(vr() * HAIRS.length)],
     shirt: SHIRTS[Math.floor(vr() * SHIRTS.length)],
-    hairStyle: Math.floor(vr() * 4),
+    hairStyle: Math.floor(vr() * HAIR_STYLES),
+    top: Math.floor(vr() * TOPS),
     glasses: vr() < 0.3,
     beard: vr() < 0.22,
   };
@@ -321,13 +327,33 @@ function personLook(seed) {
 function drawHeadFace(ctx, cx, hy, look, blink) {
   const { skin, hair, hairStyle, glasses, beard } = look;
   const hx = cx - 6;
-  if (hairStyle === 1) { px(ctx, hx, hy - 2, 12, 8, hair); px(ctx, hx + 3, hy - 4, 6, 3, hair); } // tall quiff
-  else if (hairStyle === 2) { px(ctx, hx, hy, 12, 6, hair); px(ctx, hx + 4, hy, 2, 3, shade(hair, 22)); } // side part
-  else if (hairStyle === 3) { px(ctx, hx + 1, hy + 1, 10, 4, hair); } // cropped
-  else { px(ctx, hx, hy, 12, 6, hair); } // classic
-  px(ctx, hx - 1, hy + 4, 2, 7, hair);   // sides
-  px(ctx, hx + 11, hy + 4, 2, 7, hair);
   const fy = hy + 4;
+  // --- hair style (7 variants). `sides`/`sideH` control the temple hair that
+  // frames the face; bald shaves the sides (bare crown). All styles stay flush
+  // to the skull — no protruding tufts that read as detached nubs at this size. ---
+  let sides = true, sideH = 7;
+  switch (hairStyle) {
+    case 1: // tall quiff / pompadour
+      px(ctx, hx, hy - 2, 12, 8, hair); px(ctx, hx + 3, hy - 4, 6, 3, hair); break;
+    case 2: // side part — a parting line cut INTO the cap (not a raised tab)
+      px(ctx, hx, hy, 12, 6, hair); px(ctx, hx + 4, hy, 1, 5, shade(hair, -34)); break;
+    case 3: // cropped / buzz
+      px(ctx, hx + 1, hy + 1, 10, 4, hair); break;
+    case 4: // long — frames the face down past the jaw
+      px(ctx, hx, hy, 12, 6, hair); sideH = 14; break;
+    case 5: // bald — bare crown, no side hair
+      px(ctx, hx + 1, hy + 1, 10, 4, skin);
+      px(ctx, hx + 2, hy + 1, 6, 1, shade(skin, 18)); // pate shine
+      sides = false; break;
+    case 6: // afro / curls — a big rounded cap
+      px(ctx, hx - 1, hy - 2, 14, 8, hair); px(ctx, hx, hy - 3, 12, 2, hair); sideH = 9; break;
+    default: // 0 classic
+      px(ctx, hx, hy, 12, 6, hair);
+  }
+  if (sides) {
+    px(ctx, hx - 1, hy + 4, 2, sideH, hair); // sides
+    px(ctx, hx + 11, hy + 4, 2, sideH, hair);
+  }
   px(ctx, cx - 5, fy, 11, 10, skin);
   px(ctx, cx - 5, fy, 11, 2, shade(skin, 16)); // forehead light
   if (blink) {
@@ -349,54 +375,122 @@ function drawHeadFace(ctx, cx, hy, look, blink) {
   px(ctx, cx - 1, fy + 10, 3, 2, shade(skin, -14)); // neck
 }
 
+// Torso + clothing for one worker, from a personLook(). Shared by drawPerson
+// (seated) and drawWalker (standing) so the outfit matches in both. (cx, ty) =
+// centre-x and the shoulder line. Arms/legs are drawn by the caller; this is
+// just the shirt block + a per-`top` clothing detail.
+function drawTorso(ctx, cx, ty, look) {
+  const s = look.shirt;
+  px(ctx, cx - 5, ty, 11, 3, s);                  // shoulders (tapered in)
+  px(ctx, cx - 6, ty + 3, 13, 8, s);              // torso body
+  px(ctx, cx + 3, ty + 3, 4, 8, shade(s, -26));   // right-side shade
+  switch (look.top) {
+    case 1: // hoodie — neck roll, kangaroo pocket, drawstrings
+      px(ctx, cx - 5, ty, 11, 2, shade(s, -34));
+      px(ctx, cx - 3, ty + 6, 7, 3, shade(s, -30));
+      px(ctx, cx - 3, ty + 6, 7, 1, shade(s, -14));
+      px(ctx, cx - 1, ty + 2, 1, 4, '#eee8dc');
+      px(ctx, cx + 1, ty + 2, 1, 4, '#eee8dc');
+      break;
+    case 2: // button-up / collared shirt
+      px(ctx, cx - 3, ty, 3, 2, shade(s, 20));     // collar
+      px(ctx, cx + 1, ty, 3, 2, shade(s, 20));
+      px(ctx, cx - 1, ty, 2, 11, shade(s, 14));    // placket
+      for (let i = 0; i < 4; i++) px(ctx, cx, ty + 2 + i * 2, 1, 1, shade(s, -52)); // buttons
+      break;
+    case 3: // crewneck sweater — ribbed collar + contrast chest band
+      px(ctx, cx - 4, ty, 9, 2, shade(s, 24));
+      px(ctx, cx - 6, ty + 6, 13, 2, shade(s, -22));
+      break;
+    case 4: // blazer over a tee — lapels + a lighter inner panel
+      px(ctx, cx - 2, ty + 1, 5, 10, shade(s, 70));
+      px(ctx, cx - 5, ty, 3, 6, shade(s, -22));
+      px(ctx, cx + 3, ty, 3, 6, shade(s, -22));
+      px(ctx, cx + 3, ty + 3, 4, 8, shade(s, -36));
+      break;
+    case 5: // striped tee
+      px(ctx, cx - 6, ty + 4, 13, 1, shade(s, -40));
+      px(ctx, cx - 6, ty + 7, 13, 1, shade(s, -40));
+      px(ctx, cx - 6, ty + 10, 13, 1, shade(s, -40));
+      px(ctx, cx - 1, ty, 2, 4, shade(s, 18));     // small collar
+      break;
+    default: // 0 plain tee
+      px(ctx, cx - 1, ty, 2, 11, shade(s, 18));    // collar / placket
+  }
+}
+
+// A staggered idle "fidget": every ~FIDGET_PERIOD frames an idling worker briefly
+// performs one of three small actions, so a roomful never moves in lockstep.
+// Returns { kind 0..2, t:0..1 progress } while one plays, else null. Deterministic
+// from seed+frame (frame advances ~7.7×/s, so a fidget runs ~3s every ~15s).
+const FIDGET_PERIOD = 116, FIDGET_LEN = 22;
+function idleFidget(seed, frame) {
+  const ph = (((frame + seed * 37) % FIDGET_PERIOD) + FIDGET_PERIOD) % FIDGET_PERIOD;
+  if (ph >= FIDGET_LEN) return null;
+  const kind = Math.floor((frame + seed * 37) / FIDGET_PERIOD) % 3;
+  return { kind, t: ph / FIDGET_LEN };
+}
+
 export function drawPerson(ctx, cx, headTopY, opts) {
   const { seed = 1, activity = 'idle', frame = 0, unread = false } = opts;
-  const look = personLook(seed);
+  const look = opts.look || personLook(seed);
   const { skin, shirt } = look;
 
   const typing = activity === 'working';
   const shellRunning = activity === 'shell';
+  const idle = !typing && !shellRunning;
   const fp = frame + (seed % 6);
-  // Vertical body bob. A WORKING agent DIPS DOWN on the typing cadence (leaning
-  // into the work) so it never rises above the desk line; a shell-running /
-  // freshly-idle-unread one "breathes" slowly upward; settled-idle stands still.
+  // Vertical body bob. WORKING dips DOWN on the typing cadence (leaning in);
+  // shell/just-finished "breathe" up on a quick cadence; settled-idle breathes
+  // calmly on a slow one AND throws an occasional fidget (sip / stretch / lean).
+  const fidget = idle && !unread ? idleFidget(seed, frame) : null;
   const breath = (shellRunning || unread) && fp % 8 < 4 ? 1 : 0;
+  const idleBreath = idle && !unread && fp % 16 < 8 ? 1 : 0;
   const typeBob = typing && frame % 4 < 2 ? 1 : 0; // dips DOWN, not up
-  const hy = headTopY - breath + typeBob;
+  const hy = headTopY - breath - idleBreath + typeBob;
   const blink = (frame + (seed % 11)) % 13 === 0;
   const fy = hy + 4;
 
   // hair + head + face + neck (shared with the standing drawWalker)
   drawHeadFace(ctx, cx, hy, look, blink);
 
-  // --- torso (shirt) --- slimmed so the worker reads as a compact little person
-  // rather than a wide block: shoulders taper from the neck, body ~13 wide (was
-  // 15) and a touch shorter. (The desk hides the lower half on a seated worker.)
+  // --- torso (shirt) — slimmed so the worker reads as a compact little person.
+  // (The desk hides the lower half on a seated worker.)
   const ty = fy + 12; // carries the breath/typeBob shift via hy
-  px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders (tapered in)
-  px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
-  px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26)); // right-side shade
-  px(ctx, cx - 1, ty, 2, 11, shade(shirt, 18));   // collar/placket
-  // arms. A just-finished UNREAD worker raises its right arm and waves to catch
-  // your eye (left arm stays at the desk); reads as "I'm done, come look" — and
-  // pops against the now-still idle pose. Otherwise: arms to the desk, hands
-  // bobbing while typing.
+  drawTorso(ctx, cx, ty, look);                   // shirt + per-`top` clothing
+  const arm = shade(shirt, -12);
+  // arms. UNREAD waves; a settled-idle worker fidgets; a working one strikes the
+  // keys; otherwise the arms rest at the desk.
   if (unread && !typing && !shellRunning) {
     const wig = frame % 4 < 2 ? 0 : 2; // slow side-to-side hand wiggle (~2 Hz)
-    px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12)); // left arm down
+    px(ctx, cx - 8, ty + 3, 2, 7, arm);               // left arm down
     px(ctx, cx - 8, ty + 10, 2, 2, skin);             // left hand at desk
-    px(ctx, cx + 6, ty, 2, 5, shade(shirt, -12));     // right upper arm, raised
-    px(ctx, cx + 7, ty - 5, 2, 6, shade(shirt, -12)); // right forearm up
+    px(ctx, cx + 6, ty, 2, 5, arm);                   // right upper arm, raised
+    px(ctx, cx + 7, ty - 5, 2, 6, arm);               // right forearm up
     px(ctx, cx + 6 + wig, ty - 9, 3, 3, skin);        // waving hand
+  } else if (fidget && fidget.kind === 0) {           // sip a coffee — hand to the mouth
+    px(ctx, cx - 8, ty + 3, 2, 7, arm); px(ctx, cx - 8, ty + 10, 2, 2, skin); // left rests
+    px(ctx, cx + 7, ty + 2, 2, 4, arm);               // right upper arm
+    px(ctx, cx + 3, ty - 1, 2, 4, arm);               // forearm angled toward the face
+    px(ctx, cx + 1, fy + 7, 4, 4, '#e4ded3');         // mug at the mouth
+    px(ctx, cx + 1, fy + 7, 4, 1, '#f2ede4');
+    px(ctx, cx + 5, fy + 8, 1, 2, '#c4bdb2');         // handle
+    if (frame % 4 < 2) px(ctx, cx + 2, fy + 4, 1, 1, '#b8bdc8'); // steam
+  } else if (fidget && fidget.kind === 1) {           // stretch — both arms reach up & ease back
+    const up = Math.round(Math.sin(fidget.t * Math.PI) * 5);
+    px(ctx, cx - 8, ty + 1 - up, 2, 6, arm); px(ctx, cx - 8, ty - 4 - up, 2, 2, skin);
+    px(ctx, cx + 7, ty + 1 - up, 2, 6, arm); px(ctx, cx + 7, ty - 4 - up, 2, 2, skin);
+  } else if (fidget && fidget.kind === 2) {           // lean back — elbows winged out, hands behind head
+    px(ctx, cx - 9, ty + 1, 2, 4, arm); px(ctx, cx - 9, ty - 2, 4, 2, arm);
+    px(ctx, cx + 7, ty + 1, 2, 4, arm); px(ctx, cx + 6, ty - 2, 4, 2, arm);
   } else {
-    // typing: forearms + hands STRIKE up off the keyboard, alternating L/R (with
-    // the body bob above) so it clearly reads as working; at rest the arms hang.
+    // typing strikes alternate L/R; at rest the arms simply hang at the desk.
     const lh = typing && frame % 2 ? 2 : 0;
     const rh = typing && frame % 2 ? 0 : 2;
-    px(ctx, cx - 8, ty + 3, 2, 7 - lh, shade(shirt, -12)); // left arm (raises with its hand)
-    px(ctx, cx + 7, ty + 3, 2, 7 - rh, shade(shirt, -12)); // right arm (mirror of the left about cx)
-    px(ctx, cx - 8, ty + 10 - lh, 2, 2, skin);             // left hand (lifts UP, stays above the desk)
-    px(ctx, cx + 7, ty + 10 - rh, 2, 2, skin);             // right hand
+    px(ctx, cx - 8, ty + 3, 2, 7 - lh, arm);          // left arm (raises with its hand)
+    px(ctx, cx + 7, ty + 3, 2, 7 - rh, arm);          // right arm (mirror about cx)
+    px(ctx, cx - 8, ty + 10 - lh, 2, 2, skin);        // left hand
+    px(ctx, cx + 7, ty + 10 - rh, 2, 2, skin);        // right hand
   }
 }
 
@@ -405,26 +499,37 @@ export function drawPerson(ctx, cx, headTopY, opts) {
 // feet. Front-facing (no flip); `walking` strides the legs and bobs the body.
 export function drawWalker(ctx, cx, feetY, opts = {}) {
   const { seed = 1, frame = 0, walking = false } = opts;
-  const look = personLook(seed);
+  const look = opts.look || personLook(seed);
   const { skin, shirt } = look;
   const blink = (frame + (seed % 11)) % 13 === 0;
   // soft pixel ground shadow for grounding
   px(ctx, cx - 6, feetY, 12, 1, 'rgba(0,0,0,0.20)');
   px(ctx, cx - 4, feetY + 1, 8, 1, 'rgba(0,0,0,0.12)');
-  const bob = walking && frame % 4 < 2 ? 1 : 0; // gentle walk bob (upper body)
-  const ty = feetY - 19 - bob;          // torso top
-  const hy = ty - 16;                   // head top (neck lands back at ty)
+  const bob = walking && frame % 4 < 2 ? 1 : 0;                      // gentle walk bob
+  const idleRise = !walking && (frame + seed * 3) % 18 < 9 ? 1 : 0;  // calm standing breath
+  const ty = feetY - 19 - bob - idleRise; // torso top
+  const hy = ty - 16;                     // head top (neck lands back at ty)
   drawHeadFace(ctx, cx, hy, look, blink);
-  // torso (shirt) — slimmed to match the seated worker (compact, not a block)
-  px(ctx, cx - 5, ty, 11, 3, shirt);              // shoulders
-  px(ctx, cx - 6, ty + 3, 13, 8, shirt);          // torso body
-  px(ctx, cx + 3, ty + 3, 4, 8, shade(shirt, -26));
-  px(ctx, cx - 1, ty, 2, 11, shade(shirt, 18));
-  // arms hanging at the sides (thinner, mirrored about cx)
-  px(ctx, cx - 8, ty + 3, 2, 7, shade(shirt, -12));
-  px(ctx, cx + 7, ty + 3, 2, 7, shade(shirt, -12));
-  px(ctx, cx - 8, ty + 10, 2, 2, skin);
-  px(ctx, cx + 7, ty + 10, 2, 2, skin);
+  // torso (shirt) — shared with the seated worker so the outfit matches
+  drawTorso(ctx, cx, ty, look);
+  const arm = shade(shirt, -12);
+  // arms — swing opposite the legs while walking, fidget while idling (stretch /
+  // check a phone), else hang. Idle fidgets are seed-staggered so wanderers don't sync.
+  const fidget = !walking ? idleFidget(seed, frame) : null;
+  if (fidget && fidget.kind === 1) {            // stretch up
+    const up = Math.round(Math.sin(fidget.t * Math.PI) * 5);
+    px(ctx, cx - 8, ty + 1 - up, 2, 6, arm); px(ctx, cx - 8, ty - 4 - up, 2, 2, skin);
+    px(ctx, cx + 7, ty + 1 - up, 2, 6, arm); px(ctx, cx + 7, ty - 4 - up, 2, 2, skin);
+  } else if (fidget && fidget.kind === 0) {     // check a phone — hands meet in front, screen glows
+    px(ctx, cx - 6, ty + 4, 2, 4, arm); px(ctx, cx + 5, ty + 4, 2, 4, arm); // forearms angled in
+    px(ctx, cx - 4, ty + 7, 8, 2, skin);        // hands at the belly
+    px(ctx, cx - 2, ty + 6, 5, 2, '#2a2f3a');   // the phone
+    px(ctx, cx - 2, ty + 6, 5, 1, '#5cd0ff');   // its glow
+  } else {                                      // hang; hands swing ±1 opposite while walking
+    const sw = walking ? (frame % 4 < 2 ? 1 : -1) : 0;
+    px(ctx, cx - 8, ty + 3, 2, 7, arm); px(ctx, cx - 8, ty + 10 + sw, 2, 2, skin);
+    px(ctx, cx + 7, ty + 3, 2, 7, arm); px(ctx, cx + 7, ty + 10 - sw, 2, 2, skin);
+  }
   // legs (pants, darker than the shirt) + an alternating walk stride
   const pants = shade(shirt, -55);
   const legTop = ty + 11, legH = feetY - legTop;
@@ -432,6 +537,90 @@ export function drawWalker(ctx, cx, feetY, opts = {}) {
   const rLift = walking && frame % 4 < 2 ? 0 : 1;
   px(ctx, cx - 4, legTop + lLift, 3, legH - lLift, pants);
   px(ctx, cx + 1, legTop + rLift, 3, legH - rLift, pants);
+}
+
+// ---- pets: a wandering cat + a lounging dog -------------------------------
+// Pure procedural sprites (office.js owns their roaming STATE and passes it in as
+// opts). Both animate off `frame`; the cat additionally flips to face its heading.
+// (cx of the cat art is ~x+5; the dog faces right and doesn't flip.)
+export function drawCat(ctx, x, y, frame, dir = 1, opts = {}) {
+  x = Math.round(x); y = Math.round(y);
+  const { sleeping = false, petted = false, walking = false } = opts;
+  const body = '#23252c';
+  const flip = dir < 0; // mirror about the body centre so it walks the way it heads
+  if (flip) { ctx.save(); ctx.translate((x + 5) * 2, 0); ctx.scale(-1, 1); }
+  if (sleeping) {
+    // curled up, eyes shut, slow breathing; a "z" drifts above.
+    const br = frame % 16 < 8 ? 0 : 1;
+    px(ctx, x, y - 4 - br, 11, 4 + br, body);        // curled body
+    px(ctx, x + 7, y - 5 - br, 5, 4, body);          // tucked head
+    px(ctx, x + 8, y - 7 - br, 2, 2, body);          // folded ear
+    px(ctx, x + 8, y - 3 - br, 2, 1, '#3a3d45');     // closed eye
+    px(ctx, x - 1, y - 1, 6, 1, body);               // tail wrapped round the front
+    const zz = '#9aa3b5', zy = y - 11 - (frame % 8 < 4 ? 0 : 1); // "z" bobs
+    px(ctx, x + 12, zy, 3, 1, zz); px(ctx, x + 13, zy + 1, 1, 1, zz); px(ctx, x + 12, zy + 2, 3, 1, zz);
+  } else {
+    // sitting / walking. Idle cats periodically groom (head dips, a pink tongue)
+    // and flick an ear; walking cats bob and shuffle their paws.
+    const grooming = !petted && !walking && (frame + 3) % 70 < 12;
+    const earTwitch = !petted && !grooming && frame % 44 < 2;
+    const bob = walking && frame % 4 < 2 ? 1 : 0, by = y - bob;
+    const hd = grooming ? 2 : 0;                       // head dips to groom
+    px(ctx, x, by - 6, 8, 6, body);                   // body
+    px(ctx, x + 6, by - 11 + hd, 6, 6, body);         // head
+    px(ctx, x + 6, by - 13 + hd - (earTwitch ? 1 : 0), 2, 3 + (earTwitch ? 1 : 0), body); // left ear (twitches)
+    px(ctx, x + 10, by - 13 + hd, 2, 3, body);        // right ear
+    if (grooming) {
+      px(ctx, x + 8, by - 8, 1, 1, '#3a3d45');        // eye lowered while licking
+      px(ctx, x + 8, by - 5, 1, 1, '#ff9db0');        // tongue at the paw
+    } else {
+      px(ctx, x + 8, by - 9, 1, 1, '#6cff9a'); px(ctx, x + 10, by - 9, 1, 1, '#6cff9a'); // eyes
+    }
+    const tail = frame % 8 < 4 ? 0 : 1;
+    if (petted) px(ctx, x - 2, by - 12, 2, 7, body);            // happy upright tail
+    else if (walking) px(ctx, x - 3, by - 7 - tail, 3, 2, body); // tail trails behind
+    else px(ctx, x - 2, by - 8 - tail, 2, 6, body);            // lazy tail flick
+    const step = walking && frame % 4 < 2 ? 1 : 0;             // paw shuffle
+    px(ctx, x + 1, by - step, 1, 1, body); px(ctx, x + 5, by - (walking ? 1 - step : 0), 1, 1, body);
+  }
+  if (flip) ctx.restore();
+  if (petted) { // hearts float up (drawn UNflipped so they read upright)
+    const hx = x + 3, hy = y - 16 - (frame % 6), pink = '#ff6b9d';
+    px(ctx, hx, hy, 1, 1, pink); px(ctx, hx + 2, hy, 1, 1, pink);
+    px(ctx, hx - 1, hy + 1, 5, 1, pink); px(ctx, hx, hy + 2, 3, 1, pink); px(ctx, hx + 1, hy + 3, 1, 1, pink);
+  }
+}
+
+export function drawDog(ctx, x, y, opts = {}) {
+  x = Math.round(x); y = Math.round(y);
+  const { frame = 0, petted = false } = opts;
+  const fur = '#d98a4a', dk = '#b5702e';
+  // periodic behaviours on offset cadences so they don't coincide
+  const yawning = !petted && (frame + 5) % 104 < 10;   // a slow yawn
+  const panting = petted || frame % 64 < 20;           // tongue out (always while petted)
+  const earPerk = (frame + 7) % 52 < 6;                // ear pricks up, alert
+  const lookDn = (frame + 11) % 86 < 8 ? 1 : 0;        // glances down/around
+  const headBob = petted && frame % 4 < 2 ? 1 : 0;     // happy head bob when petted
+  px(ctx, x, y - 5, 12, 5, fur);                       // body
+  const hy = y - 9 - headBob;
+  px(ctx, x + 10, hy, 6, 6, fur);                      // head
+  px(ctx, x + 9, hy - 1 - (earPerk ? 1 : 0), 2, 4 + (earPerk ? 1 : 0), dk); // ear (perks)
+  px(ctx, x + 14, hy + 3 + lookDn, 1, 1, '#1b1b22');   // eye (drifts when looking around)
+  px(ctx, x + 16, hy + 4, 2, 1, '#1b1b22');            // snout
+  if (yawning) {                                       // open mouth + a bit of tongue
+    px(ctx, x + 15, hy + 5, 3, 2, '#3a1f16'); px(ctx, x + 16, hy + 6, 1, 1, '#ff9db0');
+  } else if (panting) {
+    const t = frame % 8 < 4 ? 1 : 0; px(ctx, x + 16, hy + 5 + t, 2, 2 - t, '#ff7a93'); // lolling tongue
+  }
+  const wag = petted ? (frame % 4 < 2 ? 0 : 2) : (frame % 8 < 4 ? 0 : 1);
+  px(ctx, x - 3, y - 6 - wag, 4, 2, '#e09a5a');        // wagging tail
+  px(ctx, x + 8, y - 5, 4, 3, '#fff');                 // white belly patch
+  px(ctx, x + 1, y, 1, 1, dk); px(ctx, x + 9, y, 1, 1, dk); // paws
+  if (petted) {
+    const hx = x + 12, hy2 = y - 16 - (frame % 6), pink = '#ff6b9d';
+    px(ctx, hx, hy2, 1, 1, pink); px(ctx, hx + 2, hy2, 1, 1, pink);
+    px(ctx, hx - 1, hy2 + 1, 5, 1, pink); px(ctx, hx, hy2 + 2, 3, 1, pink); px(ctx, hx + 1, hy2 + 3, 1, 1, pink);
+  }
 }
 
 // ---- a desk workstation ----------------------------------------------------

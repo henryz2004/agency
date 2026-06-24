@@ -7,7 +7,7 @@ import { makeAgents } from './mock-agents.js';
 import {
   px, shade, hashInt, rng,
   drawWall, drawFloor, drawDaylight, moodForHour,
-  drawCubicle, drawCrown, drawNeedsYou, drawWalker, CELL_W, CELL_H,
+  drawCubicle, drawCrown, drawNeedsYou, drawWalker, drawCat, drawDog, CELL_W, CELL_H,
 } from './sprites.js';
 import { createAvatar } from './avatar.js';
 
@@ -457,70 +457,6 @@ function drawKitchen(z) {
   ctx.fillStyle = '#5cd0ff';
   for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) px(ctx, vx + 3 + c * 3, y - 3 + r * 6, 2, 4, ['#5cd0ff', '#ffd166', '#6cff9a', '#e07db0'][(r + c) % 4]);
   px(ctx, vx + 12, y + 4, 3, 6, '#0d1018'); // dispense slot
-}
-
-function drawCat(x, y, frame, dir = 1, opts = {}) {
-  x = Math.round(x); y = Math.round(y);
-  const { sleeping = false, petted = false } = opts;
-  const body = '#23252c';
-  // The art faces right; mirror about the body centre (~x+5) to face left so the
-  // cat walks the way it's heading instead of moonwalking backwards.
-  const flip = dir < 0;
-  if (flip) { ctx.save(); ctx.translate((x + 5) * 2, 0); ctx.scale(-1, 1); }
-  if (sleeping) {
-    // curled up, lower profile, eyes shut, slow breathing; a "z" drifts above.
-    const br = frame % 16 < 8 ? 0 : 1;               // slow breathe
-    px(ctx, x, y - 4 - br, 11, 4 + br, body);        // curled body (wider + lower)
-    px(ctx, x + 7, y - 5 - br, 5, 4, body);          // tucked head
-    px(ctx, x + 8, y - 7 - br, 2, 2, body);          // one folded ear
-    px(ctx, x + 8, y - 3 - br, 2, 1, '#3a3d45');     // closed eye (a line)
-    px(ctx, x - 1, y - 1, 6, 1, body);               // tail wrapped round the front
-    const zz = '#9aa3b5', zy = y - 11 - (frame % 8 < 4 ? 0 : 1); // "z" bobs slowly
-    px(ctx, x + 12, zy, 3, 1, zz); px(ctx, x + 13, zy + 1, 1, 1, zz); px(ctx, x + 12, zy + 2, 3, 1, zz);
-  } else {
-    const tail = frame % 8 < 4 ? 0 : 1;
-    px(ctx, x, y - 6, 8, 6, body);        // body
-    px(ctx, x + 6, y - 11, 6, 6, body);   // head
-    px(ctx, x + 6, y - 13, 2, 3, body);   // ears
-    px(ctx, x + 10, y - 13, 2, 3, body);
-    px(ctx, x + 8, y - 9, 1, 1, '#6cff9a'); // eyes
-    px(ctx, x + 10, y - 9, 1, 1, '#6cff9a');
-    if (petted) px(ctx, x - 2, y - 12, 2, 7, body);  // happy upright tail
-    else px(ctx, x - 2, y - 8 - tail, 2, 6, body);   // lazy tail flick
-    px(ctx, x + 1, y, 1, 1, body); px(ctx, x + 5, y, 1, 1, body); // paws
-  }
-  if (flip) ctx.restore();
-  // petting hearts float up over the cat (drawn UNflipped so they read upright).
-  if (petted) {
-    const hx = x + 3, hy = y - 16 - (frame % 6), pink = '#ff6b9d';
-    px(ctx, hx, hy, 1, 1, pink); px(ctx, hx + 2, hy, 1, 1, pink);
-    px(ctx, hx - 1, hy + 1, 5, 1, pink);
-    px(ctx, hx, hy + 2, 3, 1, pink);
-    px(ctx, hx + 1, hy + 3, 1, 1, pink);
-  }
-}
-
-function drawDog(ctx, x, y, opts = {}) {
-  const { frame = 0, petted = false } = opts;
-  px(ctx, x, y - 5, 12, 5, '#d98a4a');   // body
-  px(ctx, x + 10, y - 9, 6, 6, '#d98a4a'); // head
-  px(ctx, x + 9, y - 10, 2, 4, '#b5702e');  // ear
-  px(ctx, x + 14, y - 6, 1, 1, '#1b1b22');  // eye
-  px(ctx, x + 16, y - 5, 2, 1, '#1b1b22');  // snout
-  // wagging tail (back/left). Idle: a gentle 1px lift on a slow cadence.
-  // Petted: a faster, bigger 2px sweep — the happy wag.
-  const wag = petted ? (frame % 4 < 2 ? 0 : 2) : (frame % 8 < 4 ? 0 : 1);
-  px(ctx, x - 3, y - 6 - wag, 4, 2, '#e09a5a');   // tail
-  px(ctx, x + 8, y - 5, 4, 3, '#fff');      // white belly patch
-  px(ctx, x + 1, y, 1, 1, '#b5702e'); px(ctx, x + 9, y, 1, 1, '#b5702e'); // paws
-  // petting heart floats up over the dog's head (same pink pixel heart as the cat).
-  if (petted) {
-    const hx = x + 12, hy = y - 16 - (frame % 6), pink = '#ff6b9d';
-    px(ctx, hx, hy, 1, 1, pink); px(ctx, hx + 2, hy, 1, 1, pink);
-    px(ctx, hx - 1, hy + 1, 5, 1, pink);
-    px(ctx, hx, hy + 2, 3, 1, pink);
-    px(ctx, hx + 1, hy + 3, 1, 1, pink);
-  }
 }
 
 // A muted area rug under each desk cluster — grounds the team neighbourhood and
@@ -1459,7 +1395,7 @@ function draw() {
     }
   });
   if (avatar && avatar.enabled) actors.push({ y: avatar.pos.y, fn: () => avatar.draw(ctx) });
-  if (cat.init) actors.push({ y: cat.y, fn: () => drawCat(cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted }) });
+  if (cat.init) actors.push({ y: cat.y, fn: () => drawCat(ctx, cat.x, cat.y, frame, cat.dir, { sleeping: cat.sleeping, petted: cat.petted, walking: !cat.sit && !cat.sleeping }) });
   if (dog.init) actors.push({ y: dog.y, fn: () => drawDog(ctx, dog.x, dog.y, { frame, petted: dog.petted }) });
   actors.sort((p, q) => p.y - q.y);
   for (const act of actors) act.fn();

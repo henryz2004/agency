@@ -6,8 +6,10 @@
   "description": "A live pixel-art office sim of your Claude Code, Codex, and opencode workforce.",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check lib/control.js && node --check public/app.js && node --check public/chat-panel.js && node --check public/office.js && node --check public/sprites.js && node --check public/avatar.js && node --check public/ui.js && node --check public/sound.js && node --check public/audio-controls.js && node --check public/mock.js && node --check public/mock-agents.js && node --check scripts/install-hook.mjs",
-    "install-hook": "node scripts/install-hook.mjs"
+    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check lib/control.js && node --check public/app.js && node --check public/chat-panel.js && node --check public/office.js && node --check public/sprites.js && node --check public/avatar.js && node --check public/ui.js && node --check public/sound.js && node --check public/audio-controls.js && node --check public/mock.js && node --check public/mock-agents.js && node --check scripts/install-hook.mjs && node --check scripts/_pixpng.mjs && node --check scripts/charsheet.mjs && node --check scripts/animsheet.mjs",
+    "install-hook": "node scripts/install-hook.mjs",
+    "charsheet": "node scripts/charsheet.mjs",
+    "animsheet": "node scripts/animsheet.mjs"
   },
   "engines": {
     "node": ">=18"
