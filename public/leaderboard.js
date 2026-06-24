@@ -10,7 +10,7 @@
 
 import { standardEngYears } from './metric.js';
 
-const LEADERBOARD_API = ''; // e.g. 'https://agency-leaderboard.you.workers.dev'
+const LEADERBOARD_API = 'https://agency-leaderboard.henryz2004.workers.dev';
 
 const KNOWN_SOURCES = ['claude', 'codex', 'opencode'];
 const LS = { id: 'agency.lb.installId', handle: 'agency.lb.handle', opted: 'agency.lb.optedIn' };

@@ -7,8 +7,7 @@
     {
       "binding": "DB",
       "database_name": "agency-leaderboard",
-      // Fill in after `wrangler d1 create agency-leaderboard` (see README.md).
-      "database_id": "PUT-YOUR-D1-DATABASE-ID-HERE"
+      "database_id": "cd017808-b746-41a1-abff-011e7c8a1035"
     }
   ]
 }
