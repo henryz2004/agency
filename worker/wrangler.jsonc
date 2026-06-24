@@ -1,0 +1,14 @@
+{
+  "name": "agency-leaderboard",
+  "main": "index.js",
+  "compatibility_date": "2025-06-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agency-leaderboard",
+      // Fill in after `wrangler d1 create agency-leaderboard` (see README.md).
+      "database_id": "PUT-YOUR-D1-DATABASE-ID-HERE"
+    }
+  ]
+}

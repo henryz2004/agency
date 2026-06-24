@@ -1,12 +1,22 @@
 {
-  "name": "agency",
+  "name": "claude-agency",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "description": "A live pixel-art office sim of your Claude Code, Codex, and opencode workforce.",
+  "license": "MIT",
+  "bin": {
+    "agency": "server.js"
+  },
+  "files": [
+    "server.js",
+    "lib/",
+    "public/",
+    "scripts/",
+    "README.md"
+  ],
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check lib/control.js && node --check public/app.js && node --check public/chat-panel.js && node --check public/office.js && node --check public/sprites.js && node --check public/avatar.js && node --check public/ui.js && node --check public/sound.js && node --check public/audio-controls.js && node --check public/mock.js && node --check public/mock-agents.js && node --check scripts/install-hook.mjs",
+    "check": "node --check server.js && node --check lib/live.js && node --check lib/usage.js && node --check lib/opencode.js && node --check lib/codex.js && node --check lib/roster.js && node --check lib/transcript.js && node --check lib/control.js && node --check lib/paths.js && node --check public/app.js && node --check public/chat-panel.js && node --check public/office.js && node --check public/sprites.js && node --check public/avatar.js && node --check public/ui.js && node --check public/sound.js && node --check public/audio-controls.js && node --check public/mock.js && node --check public/mock-agents.js && node --check public/metric.js && node --check public/leaderboard.js && node --check worker/index.js && node --check scripts/install-hook.mjs",
     "install-hook": "node scripts/install-hook.mjs"
   },
   "engines": {

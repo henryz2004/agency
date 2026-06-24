@@ -42,6 +42,7 @@
       </div>
       <div class="topctrls">
         <div class="live-pill"><span class="rec"></span> LIVE</div>
+        <button id="leaderboardBtn" class="panel-toggle" type="button" title="Leaderboard" hidden>🏆</button>
         <button id="panelToggle" class="panel-toggle" type="button" title="Toggle stats panel">📊</button>
       </div>
     </div>
@@ -171,6 +172,19 @@
     <div id="panelHandle" class="panel-handle" title="Show stats">📊</div>
   </main>
 
+  <!-- Leaderboard (opt-in social layer). Hidden unless LEADERBOARD_API is set in leaderboard.js. -->
+  <div id="lbOverlay" class="lb-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="lbTitle">
+    <div class="lb-modal">
+      <button id="lbClose" class="lb-close" type="button" aria-label="Close">✕</button>
+      <div class="lb-head">
+        <h2 id="lbTitle">🏆 Leaderboard</h2>
+        <p class="lb-sub">Standardized engineer-years shipped — same formula for everyone, no sliders.</p>
+      </div>
+      <div id="lbBody" class="lb-body"></div>
+    </div>
+  </div>
+
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/leaderboard.js"></script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // server.js — zero-dependency HTTP server for Agency.
 // Serves the static frontend and a single /api/state endpoint that fuses live
 // running sessions with historical usage stats and stable agent identities.
@@ -341,6 +342,21 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// Open the dashboard in the default browser on launch (the `npx` UX). Best
+// effort + fail-silent; skip with AGENCY_NO_OPEN=1 (dev / headless / remote).
+function openBrowser(url) {
+  if (process.env.AGENCY_NO_OPEN) return;
+  const [cmd, args] =
+    process.platform === 'darwin' ? ['open', [url]]
+    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+    : ['xdg-open', [url]];
+  try {
+    execFile(cmd, args, () => {});
+  } catch {
+    /* no browser opener available — the printed URL still works */
+  }
+}
+
 server.listen(PORT, HOST, () => {
   // Warm the usage cache so the first request is fast.
   try {
@@ -350,4 +366,5 @@ server.listen(PORT, HOST, () => {
   }
   console.log(`\n  🏢  Agency is open for business.`);
   console.log(`      → http://${HOST}:${PORT}\n`);
+  openBrowser(`http://${HOST}:${PORT}`);
 });

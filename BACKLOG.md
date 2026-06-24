@@ -8,6 +8,14 @@ The vision: ship Agency to the public, self-installable, to view your AI agents
 "as employees" — then a social layer on top. Big shift: today's local, read-only,
 never-phones-home design is the opposite of what this needs.
 
+**Status (2026-06-24):** launch video done. `npx` install shipped (package
+`claude-agency`, bin `agency`; state moved to `~/.agency` via `lib/paths.js`;
+auto-opens browser) — NOT yet `npm publish`ed (pick name + `npm login` first).
+Leaderboard slice **built**: standardized-eng-years metric (`public/metric.js`,
+locked constants), Cloudflare Worker + D1 backend (`worker/`), opt-in client UI
+(`public/leaderboard.js`, dormant until `LEADERBOARD_API` is set). Remaining:
+deploy the Worker + flip on the URL; then "view other offices" + virtual city.
+
 - **Public, self-installable build** — one-command install for non-devs; cross-platform
   (adapters are macOS-local-path-specific today — Windows/Linux + single-harness users
   need handling); graceful with zero agents. The menu-bar wrapper (Possible extras)

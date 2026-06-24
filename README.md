@@ -10,18 +10,20 @@ when busy, monitor glowing by model tier), and your token throughput gets
 translated into **manpower** — effective team size, engineer-years shipped, and
 the payroll you'd be paying humans to match it.
 
-Nothing leaves your machine. No dependencies.
+Nothing leaves your machine — unless you explicitly opt into the [leaderboard](#leaderboard-opt-in). No dependencies.
 
 ![Agency](docs/screenshot.png)
 
 ## Run it
 
 ```bash
-node server.js
-# → http://localhost:4313
+npx claude-agency
+# → opens http://localhost:4313 in your browser
 ```
 
-Set a different port with `PORT=8080 node server.js`.
+That's it — no install, no build, no dependencies. (From a checkout, `node server.js`
+does the same.) Set a different port with `PORT=8080`, and `AGENCY_NO_OPEN=1` to skip
+auto-opening the browser. State (your roster + usage cache) lives in `~/.agency`.
 
 Leave it open on a second monitor and start some `claude`, `codex`, or
 `opencode` sessions — workers appear at desks within ~3 seconds, busy ones
@@ -77,11 +79,28 @@ Zero dependencies — just Node's `http` + `fs` and a vanilla-JS canvas frontend
 | `public/avatar.js` | the walkable user avatar + wandering cat (`g` to toggle, WASD/arrows) |
 | `public/app.js` | data polling, manpower math, panels, ticker |
 
-Usage stats are cached in `data/usage-cache.json` and `data/opencode-usage-cache.json`
-(only changed transcripts/DB state are re-parsed on refresh; the main cache now includes Claude, Codex, and opencode usage); agent identities persist in `data/roster.json`.
+Usage stats are cached in `~/.agency/usage-cache.json` and `~/.agency/opencode-usage-cache.json`
+(only changed transcripts/DB state are re-parsed on refresh; the main cache now includes Claude, Codex, and opencode usage); agent identities persist in `~/.agency/roster.json`. Override the location with `AGENCY_DATA_DIR`.
 
 Codex live sessions come from `~/.codex/process_manager/chat_processes.json`
 and `~/.codex/state_5.sqlite`.
 
 > The manpower numbers are a deliberately fun heuristic, not a benchmark — they
 > exist to make a one-person shop *feel like more*. Tune the sliders to taste.
+
+## Leaderboard (opt-in)
+
+Agency ships with an **optional** public leaderboard that ranks installs by
+*standardized engineer-years* — the same eng-years figure as the personal card,
+but with the assumption sliders **frozen to fixed constants** so everyone's
+number is comparable (and not gameable by tuning your own dials).
+
+It is **off by default and opt-in**. Nothing is uploaded until you open the 🏆
+panel and click *Join*, and even then the only data sent is **a display name and
+your standardized eng-years number** — never your code, transcripts, repo names,
+or project names. *Stop sharing* deletes your row.
+
+The backend is a tiny Cloudflare Worker + D1 database under [`worker/`](worker/) —
+see [`worker/README.md`](worker/README.md) to deploy your own and point the
+dashboard at it (set `LEADERBOARD_API` in `public/leaderboard.js`). Until that
+URL is set, the leaderboard UI stays hidden and Agency runs exactly as before.
