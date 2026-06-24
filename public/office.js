@@ -106,14 +106,6 @@ const AMENITY_BAND_H = 16;
 // well above 1 because the fixed amenity + lounge bands add height the bullpen
 // must out-widen. Tuned by eye against the floor-frame.
 const LANDSCAPE_ASPECT = 2.6;
-// Decor placement keeps the WHOLE room a consistent, screen-friendly shape no
-// matter the head-count: a wide bullpen gets a lounge BAND beneath it; a narrow
-// one (few teams) would read as a squashed, too-tall column, so it gets flanking
-// SIDE decor columns instead — widening the room toward TARGET_ASPECT and keeping
-// the desks centred rather than stranded at the top of the frame.
-const SIDE_COL_W = 104;    // width of each flanking decor column
-const SIDE_COL_GAP = 16;   // gap between a side column and the bullpen
-const TARGET_ASPECT = 1.7; // desired room width:height (cover-fit ≈ contain at this shape)
 
 function plan() {
   clusters = []; decor = []; cells = [];
@@ -177,15 +169,15 @@ function plan() {
     }
   });
 
-  // --- DECOR PLACEMENT: keep the room screen-shaped without stranding desks in a
-  // cavern. Three regimes by floor size:
-  //   SNUG (≤4 desks): hug the desks with minimal furniture — a small office, not a
-  //     hall. (Cuts the horizontal size + furniture for tiny floors.)
-  //   SIDE (narrow bullpen): flank with lounge columns to widen toward TARGET_ASPECT.
-  //   BAND (wide bullpen): a lounge band beneath, plus filler decor when the room is
-  //     big so a large floor doesn't read as empty.
+  // --- DECOR PLACEMENT: the room HUGS its content so there's no cavern of dead floor.
+  // Two regimes by floor size:
+  //   SNUG (≤4 desks): desks high under the wall + a plant bed in each upper corner —
+  //     a small office, not a hall.
+  //   FULL (>4 desks): desks high + ONE coherent lounge band directly below them +
+  //     a kitchen against the wall. Compact; no scattered fill.
+  // The camera (fitView) centres on the desks, so a compact/portrait room still frames
+  // them well, and the soft zoom-out lets you pull back to the whole floor.
   const nAgents = cells.length;
-  const bullH = bullpenBottom - by0;
   const minRoomW = 320;
 
   if (nAgents <= 4) {
@@ -203,97 +195,40 @@ function plan() {
     decor.push({ type: 'plants', x: bufW - MARGIN - flankW, y: TOP - 6, w: flankW, h: 44, seed: hashInt('pr') });
     dog.x = bufW - MARGIN - flankW / 2; dog.y = bullpenBottom - 4; dog.init = true;
   } else {
-  const roomWbottom = Math.max(minRoomW, rowW + MARGIN * 2);
-  const roomHbottom = bullpenBottom + 8 + LOUNGE_BAND_H + MARGIN + 8;
-  const sideMode = roomWbottom / roomHbottom < TARGET_ASPECT;
-  if (sideMode) {
-    // --- SIDE decor columns flanking a narrow bullpen ---
-    const bullpenH = bullpenBottom - by0;
-    bufW = rowW + 2 * (SIDE_COL_W + SIDE_COL_GAP) + MARGIN * 2;
-    // size the room to TARGET_ASPECT (but never shorter than the bullpen needs),
-    // then FILL the floor height with side decor and CENTRE the desks in it — so a
-    // short bullpen isn't stranded in the lower half beneath a tall empty wall.
-    const targetH = Math.max(by0 + bullpenH + MARGIN + 8, Math.round(bufW / TARGET_ASPECT));
-    const colTop = TOP + 2;                       // hug the wall (decor overlaps its base)
-    const colFloor = targetH - MARGIN - 8;        // bottom of the usable floor area
-    const span = colFloor - colTop;
-    const itemH = LOUNGE_BAND_H;
-    const nItems = clampN(Math.floor((span + 14) / (itemH + 14)), 1, 3);
-    // spread the items to fill the column span (top + bottom anchored, even gaps)
-    const vgap = nItems > 1 ? (span - nItems * itemH) / (nItems - 1) : 0;
-
-    // desks stay HIGH under the wall (no vertical centring) — the space that used to
-    // sit empty ABOVE them now lives below as a furnished lounge. Slide the bullpen
-    // into the middle lane between the columns.
-    const bullShift = SIDE_COL_W + SIDE_COL_GAP;
-    clusters.forEach((c) => { c.x += bullShift; });
-    cells.forEach((c) => { c.x += bullShift; });
-
-    // stack decor down each column; lounges anchor the room, plants soften the gaps
-    const leftTypes = ['lounge', 'plants', 'meeting'];
-    const rightTypes = ['meeting', 'plants', 'lounge'];
-    const leftX = MARGIN, rightX = bufW - MARGIN - SIDE_COL_W;
-    for (let i = 0; i < nItems; i++) {
-      const y = Math.round(colTop + i * (itemH + vgap));
-      decor.push({ type: leftTypes[i], x: leftX, y, w: SIDE_COL_W, h: itemH, seed: hashInt('L' + i) });
-      decor.push({ type: rightTypes[i], x: rightX, y, w: SIDE_COL_W, h: itemH, seed: hashInt('R' + i) });
-    }
-
-    // --- point 3: FILL the open floor above/below the vertically-centred bullpen in
-    // the middle lane, so a large office reads furnished instead of barren. ---
-    const laneX = MARGIN + SIDE_COL_W + SIDE_COL_GAP;
-    const botTop = bullpenBottom + 10;
-    if (colFloor - botTop >= 46) {
-      // a lounge band tucked under the desks, spread across the middle lane — this is
-      // where the desks' old empty headroom went (now furnished, not dead).
-      const items = rowW > 360 ? ['lounge', 'meeting', 'lounge'] : rowW > 190 ? ['lounge', 'plants'] : ['plants'];
-      const iw = Math.min(110, (rowW - 12) / items.length);
-      const g = items.length > 1 ? (rowW - items.length * iw) / (items.length - 1) : 0;
-      const h = Math.min(LOUNGE_BAND_H, colFloor - botTop);
-      items.forEach((t, i) => decor.push({ type: t, x: Math.round(laneX + i * (iw + g)), y: botTop, w: Math.round(iw), h, seed: hashInt('bg' + i) }));
-    }
-    bufH = targetH;
-    // the dog lounges at the foot of the right-hand decor column
-    dog.x = rightX + SIDE_COL_W / 2; dog.y = colFloor - 6; dog.init = true;
-  } else {
-    // --- cozy LOUNGE BAND beneath a wide bullpen ---
-    bufW = roomWbottom;
-    const bandY = bullpenBottom + 8;
-    const bandItems = bufW > 520
-      ? [
-          { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
-          { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }, { type: 'lounge', w: 100 },
-        ]
-      : bufW > 300
-        ? [{ type: 'lounge', w: 100 }, { type: 'meeting', w: 92 }, { type: 'plants', w: 40 }]
-        : [{ type: 'lounge', w: 100 }, { type: 'plants', w: 40 }];
-    // lay the band centred across the floor with even gaps
-    const bandTotal = bandItems.reduce((s, it) => s + it.w, 0);
-    const bandGap = bandItems.length > 1 ? Math.max(18, (bufW - MARGIN * 2 - bandTotal) / (bandItems.length - 1)) : 0;
-    let lx = MARGIN + Math.max(0, (bufW - MARGIN * 2 - bandTotal - bandGap * (bandItems.length - 1)) / 2);
-    bandItems.forEach((it) => {
-      decor.push({ type: it.type, x: Math.round(lx), y: bandY, w: it.w, h: LOUNGE_BAND_H, seed: hashInt(it.type + lx) });
-      lx += it.w + bandGap;
-    });
-
-    let maxY = bullpenBottom;
-    decor.forEach((z) => { maxY = Math.max(maxY, z.y + z.h); });
-    bufH = Math.round(maxY) + MARGIN + 8;
-
-    // centre the bullpen horizontally in the (possibly wider) room
+    // ---- FULL: desks high under the wall + ONE coherent lounge band directly below.
+    // The room HUGS (desks + lounge) — no cavern of dead floor, and the decor reads as
+    // a single sensible lounge instead of furniture scattered across an empty hall.
+    bufW = Math.max(minRoomW, rowW + MARGIN * 2);
+    // centre the bullpen horizontally
     const bullShift = Math.round((bufW - MARGIN * 2 - rowW) / 2);
     if (bullShift > 0) {
       clusters.forEach((c) => { c.x += bullShift; });
       cells.forEach((c) => { c.x += bullShift; });
     }
-    // the dog lounges in the band beneath the desks
-    dog.x = bufW - 60; dog.y = bandY + LOUNGE_BAND_H - 4; dog.init = true;
-  }
 
-    // kitchen counter tucked UP against the back wall — FULL floors only (a snug
-    // office skips it). Raised so its base ends above the desk line (by0) instead of
-    // dipping down into a team rug.
+    // one lounge band beneath the desks: grouped, coherent pieces (couch+table,
+    // meeting table, plant beds) scaled to the floor width.
+    const bandY = bullpenBottom + 10;
+    const floorW = bufW - MARGIN * 2;
+    const wOf = (t) => (t === 'lounge' ? 104 : t === 'meeting' ? 96 : 44);
+    const pieces = floorW > 560 ? ['plants', 'lounge', 'meeting', 'lounge', 'plants']
+      : floorW > 380 ? ['plants', 'lounge', 'meeting', 'plants']
+        : floorW > 230 ? ['lounge', 'plants']
+          : ['lounge'];
+    const used = pieces.reduce((s, t) => s + wOf(t), 0);
+    const gap = pieces.length > 1 ? Math.max(16, (floorW - used) / (pieces.length - 1)) : 0;
+    let lx = MARGIN + Math.max(0, (floorW - used - gap * (pieces.length - 1)) / 2);
+    pieces.forEach((t) => {
+      decor.push({ type: t, x: Math.round(lx), y: bandY, w: wOf(t), h: LOUNGE_BAND_H, seed: hashInt('b' + lx) });
+      lx += wOf(t) + gap;
+    });
+
+    bufH = bandY + LOUNGE_BAND_H + MARGIN;
+    // kitchen counter tucked UP against the back wall, far right (base above the desk
+    // line so it never dips into a team rug)
     decor.push({ type: 'kitchen', x: bufW - 84, y: TOP - 12, w: 78, h: 26, seed: 999 });
+    // the dog naps at the end of the lounge band
+    dog.x = bufW - MARGIN - 30; dog.y = bandY + LOUNGE_BAND_H - 4; dog.init = true;
   }
 
   // idle-wander destination ZONES: the lounge spots (couch / meeting / plants) plus
@@ -657,11 +592,8 @@ function syncLabels() {
       el.style.cssText =
         'position:absolute;transform:translateX(-50%);white-space:nowrap;' +
         "font:600 7px 'IBM Plex Mono', ui-monospace, monospace;letter-spacing:0.2px;" +
-        'color:rgba(14,10,7,0.5);text-align:center;' +
-        // engraved groove: a DARK rim along the top edge (shadowed upper wall) + a
-        // LIGHT lip along the bottom (lit lower wall) → the glyphs read as pressed IN,
-        // not a single drop-shadow sitting on top.
-        'text-shadow:0 -1px 0 rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.22);' +
+        'color:rgba(232,224,205,0.66);text-align:center;' +
+        'text-shadow:0 1px 2px rgba(0,0,0,0.6);' +
         'overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;';
       labelWrap.appendChild(el);
       repoNodes[i] = el;
