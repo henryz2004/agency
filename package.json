@@ -1,6 +1,6 @@
 {
   "name": "@henryz2004/agency",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "A live pixel-art office sim of your Claude Code, Codex, and opencode workforce.",
   "license": "MIT",
@@ -12,7 +12,8 @@
     "lib/",
     "public/",
     "scripts/",
-    "README.md"
+    "README.md",
+    "docs/agency.gif"
   ],
   "scripts": {
     "start": "node server.js",

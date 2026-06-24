@@ -12,7 +12,7 @@ the payroll you'd be paying humans to match it.
 
 Nothing leaves your machine — unless you explicitly opt into the [leaderboard](#leaderboard-opt-in). No dependencies.
 
-![Agency](docs/screenshot.png)
+![Agency — a living pixel-art office of your AI agents](https://cdn.jsdelivr.net/npm/@henryz2004/agency/docs/agency.gif)
 
 ## Run it
 
