@@ -8,3 +8,11 @@ node_modules/
 
 # claude code local state + nested agent worktrees (e.g. sprite-lab)
 .claude/
+
+# wrangler local dev state + cache (local D1, regenerable)
+.wrangler/
+**/.wrangler/
+
+# launch reel binary (14.7MB) — served from a public R2 bucket (pub-…r2.dev),
+# kept out of git AND out of the Worker deploy (see site/.assetsignore).
+site/agency-reel.mp4

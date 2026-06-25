@@ -22,6 +22,30 @@ export function standardEngYears(lifetimeOutputTokens) {
   return (Number(lifetimeOutputTokens) || 0) / TOKENS_PER_ENG_YEAR;
 }
 
+// Engineer-years expressed in eng-years per unit, from the SAME locked constants:
+// 1 eng-yr = 230 eng-days, 1 eng-day = 8 eng-hrs; an eng-month is 1/12 eng-yr.
+const EY_PER = {
+  yr: 1,
+  mo: 1 / 12,
+  day: 1 / STANDARD.daysPerYear,
+  hr: 1 / (STANDARD.daysPerYear * STANDARD.hrsPerDay),
+};
+
+// Format an engineer-years value in the largest unit where it reads naturally,
+// so a tiny score shows as "6.3 eng-hrs" not "0.003 eng-yrs". Returns a display
+// string: "8.7 eng-yrs" · "4.8 eng-mos" · "12 eng-days" · "6.3 eng-hrs" (singular
+// at exactly 1: "1 eng-yr"). Ranking stays in eng-years; only display adapts.
+export function fmtEngTime(engYears) {
+  const ey = Number(engYears) || 0;
+  let value, unit;
+  if (ey >= EY_PER.yr) { value = ey; unit = 'yr'; }
+  else if (ey >= EY_PER.mo) { value = ey / EY_PER.mo; unit = 'mo'; }
+  else if (ey >= EY_PER.day) { value = ey / EY_PER.day; unit = 'day'; }
+  else { value = ey / EY_PER.hr; unit = 'hr'; }
+  const v = value >= 10 ? Math.round(value).toString() : (Math.round(value * 10) / 10).toString();
+  return `${v} eng-${unit}${v === '1' ? '' : 's'}`;
+}
+
 // --- self-check: `node public/metric.js` -----------------------------------
 if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('metric.js')) {
   const assert = (c, m) => { if (!c) { console.error('FAIL:', m); process.exit(1); } };
@@ -30,5 +54,14 @@ if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWit
   assert(standardEngYears(0) === 0, 'zero tokens != 0');
   assert(standardEngYears(null) === 0 && standardEngYears(undefined) === 0, 'nullish != 0');
   assert(standardEngYears('11040000') === 2, 'string coercion / 2 eng-years failed');
+  // dynamic unit picker
+  assert(fmtEngTime(8.7) === '8.7 eng-yrs', `years fmt: ${fmtEngTime(8.7)}`);
+  assert(fmtEngTime(1) === '1 eng-yr', `singular year: ${fmtEngTime(1)}`);
+  assert(fmtEngTime(12) === '12 eng-yrs', `int years: ${fmtEngTime(12)}`);
+  assert(fmtEngTime(0.4).endsWith(' eng-mos'), `months unit: ${fmtEngTime(0.4)}`);
+  assert(fmtEngTime(0.01).endsWith(' eng-days'), `days unit: ${fmtEngTime(0.01)}`);
+  assert(fmtEngTime(1 / 230) === '1 eng-day', `singular day: ${fmtEngTime(1 / 230)}`);
+  assert(fmtEngTime(0.001).endsWith(' eng-hrs'), `hours unit: ${fmtEngTime(0.001)}`);
+  assert(fmtEngTime(0) === '0 eng-hrs', `zero: ${fmtEngTime(0)}`);
   console.log('metric.js self-check OK');
 }

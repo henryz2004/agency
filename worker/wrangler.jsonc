@@ -3,6 +3,9 @@
   "main": "index.js",
   "compatibility_date": "2025-06-01",
   "observability": { "enabled": true },
+  // Landing page + public leaderboard. Static assets are served first; any path
+  // with no matching file (so all /api/* routes) falls through to the Worker.
+  "assets": { "directory": "../site" },
   "d1_databases": [
     {
       "binding": "DB",

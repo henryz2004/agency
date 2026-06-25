@@ -11,3 +11,7 @@ CREATE TABLE IF NOT EXISTS scores (
   updated_at    INTEGER NOT NULL    -- ms epoch, last submit
 );
 CREATE INDEX IF NOT EXISTS idx_scores_eng_years ON scores(eng_years DESC);
+-- One display name per board (case-insensitive). Backs the dedupe check in
+-- index.js so it's atomic, not just a racy check-then-insert. (Creation fails if
+-- pre-existing rows already collide — clean those up first on an old DB.)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scores_handle_nocase ON scores(handle COLLATE NOCASE);
