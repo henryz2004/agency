@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGENCY · live office</title>
+  <!-- Ambient, non-interactive embed of the real procedural office (the same office.js
+       the dashboard runs), driven by a synthetic cast so the hero is never empty.
+       Loaded in an iframe with pointer-events:none, so it just animates. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root { --line: #222c40; --cyan: #5cd0ff; }
+    html, body { margin: 0; height: 100%; overflow: hidden;
+      background: linear-gradient(180deg, #0b0f18, #0a0d14); }
+    .floor-frame { position: absolute; inset: 0; overflow: hidden; }
+    .world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+    #office { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+    .label-layer, .proc-label-layer { position: absolute; top: 0; left: 0; pointer-events: none; transform-origin: 0 0;
+      font-family: 'IBM Plex Mono', monospace; }
+    /* office.js injects walk / names-toggle controls — hide them; this is an ambient view */
+    .floor-frame button { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="floor-frame">
+    <div class="world" id="world">
+      <canvas id="office"></canvas>
+      <div id="labels" class="label-layer"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initOffice, setAgents } from '/office.js';
+
+    // A cozy synthetic cast — your AI agents on one open floor. `project: ''` means
+    // office.js renders no repo/folder label on the rug. Sprites read model/activity/role.
+    const FIRST = ['Ada', 'Ravi', 'Mona', 'Kenji', 'Lena', 'Otis', 'Priya', 'Theo'];
+    const LAST  = ['Vance', 'Okoro', 'Sato', 'Reyes', 'Novak', 'Kapoor', 'Holt', 'Ferro'];
+    const MODELS = ['claude-opus-4-8[1m]', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'gpt-5-codex'];
+    const ACTS = ['working', 'working', 'shell', 'working', 'idle'];
+    const TASKS = ['wire up the live endpoint', 'fix the flaky tests', 'refactor the auth flow',
+      'chase a memory leak', 'tighten the camera clamps', 'draft the release notes'];
+
+    function makeAgents(n) {
+      const agents = [];
+      for (let i = 0; i < n; i++) agents.push({
+        sessionId: `hero-${i}`, pid: 5000 + i, source: 'claude', kind: 'interactive',
+        project: '',                              // empty → no rug/folder label
+        name: `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}`,
+        model: MODELS[i % MODELS.length],
+        activity: ACTS[i % ACTS.length],
+        role: i === 0 ? 'lead' : null,            // one crown
+        subagents: (i % 5 === 0) ? [{ type: 'general-purpose' }] : [],
+        chatName: TASKS[i % TASKS.length], task: null,
+      });
+      return agents;
+    }
+
+    initOffice(document.getElementById('office'), document.getElementById('labels'));
+    setAgents(makeAgents(6)); // office.js auto-fits the view and animates on its own rAF
+
+    // prefers-reduced-motion: let the floor lay out + paint a populated frame, then freeze
+    // the loop (office.js exposes no stop; it calls the global requestAnimationFrame each frame).
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setTimeout(() => { window.requestAnimationFrame = () => 0; }, 1200);
+    }
+  </script>
+</body>
+</html>

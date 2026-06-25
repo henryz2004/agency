@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGENCY · your one-person AI workforce</title>
+  <meta name="description" content="A live pixel-art office of your Claude Code, Codex, and opencode agents. Every running session becomes a pixel worker at a desk, and your token throughput becomes engineer-years on the leaderboard." />
+  <!-- Open Graph / share card -->
+  <meta property="og:title" content="AGENCY · your one-person AI workforce" />
+  <meta property="og:description" content="A live pixel-art office of your Claude Code, Codex & opencode agents. npx @henryz2004/agency" />
+  <meta property="og:image" content="poster.jpg" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <!-- pixel office-worker favicon, inline so no extra file -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%20shape-rendering='crispEdges'%3E%3Cg%20fill='%23b9603a'%3E%3Crect%20x='4'%20y='0'%20width='8'%20height='2'/%3E%3Crect%20x='2'%20y='2'%20width='12'%20height='2'/%3E%3Crect%20x='2'%20y='4'%20width='2'%20height='2'/%3E%3Crect%20x='12'%20y='4'%20width='2'%20height='2'/%3E%3Crect%20x='2'%20y='6'%20width='2'%20height='2'/%3E%3Crect%20x='12'%20y='6'%20width='2'%20height='2'/%3E%3C/g%3E%3Cg%20fill='%23e9b58c'%3E%3Crect%20x='4'%20y='4'%20width='8'%20height='2'/%3E%3Crect%20x='6'%20y='6'%20width='4'%20height='2'/%3E%3Crect%20x='4'%20y='8'%20width='8'%20height='2'/%3E%3Crect%20x='4'%20y='10'%20width='8'%20height='2'/%3E%3C/g%3E%3Cg%20fill='%2314181f'%3E%3Crect%20x='4'%20y='6'%20width='2'%20height='2'/%3E%3Crect%20x='10'%20y='6'%20width='2'%20height='2'/%3E%3C/g%3E%3Cg%20fill='%2339d98a'%3E%3Crect%20x='2'%20y='12'%20width='12'%20height='2'/%3E%3Crect%20x='0'%20y='14'%20width='16'%20height='2'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* dark world — lifted from the dashboard (public/style.css) */
+      --bg: #0a0d14; --bg2: #0e121c; --card: #131927; --card2: #0f1420;
+      --line: #222c40; --line2: #1a2336; --ink: #d4ddec; --muted: #8a94a8; --muted2: #5a6275;
+      --green: #39d98a; --cyan: #5cd0ff; --gold: #ffd166; --pink: #ff5cba;
+      /* light world — the playful "marketing" side of the split */
+      --paper: #f3f0e7; --paper2: #e8e3d4; --paper3: #fbf9f3;
+      --ink-d: #14181f; --muted-d: #5d6373; --line-d: #d8d1bf;
+      --green-d: #1f9d63; --cyan-d: #1f8fc4;
+      --pixel: 'Press Start 2P', ui-monospace, monospace;
+      --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: var(--mono); font-size: 14px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased; overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    img, video { display: block; }
+    .pixel { font-family: var(--pixel); }
+
+    /* ============================== HERO (the split) ============================== */
+    .hero {
+      display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh;
+    }
+
+    /* ---- left: light / playful pitch ---- */
+    .pitch {
+      position: relative; background:
+        radial-gradient(120% 90% at 12% 0%, var(--paper3) 0%, var(--paper) 45%, var(--paper2) 100%);
+      color: var(--ink-d);
+      padding: 28px clamp(28px, 4vw, 64px) 48px;
+      display: flex; flex-direction: column; min-height: 100vh;
+    }
+    /* faint pixel-grid texture on the cream */
+    .pitch::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+      background:
+        repeating-linear-gradient(0deg, rgba(20,24,31,.035) 0 1px, transparent 1px 24px),
+        repeating-linear-gradient(90deg, rgba(20,24,31,.035) 0 1px, transparent 1px 24px);
+    }
+    .pitch > * { position: relative; z-index: 1; }
+
+    .topnav { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand svg { width: 26px; height: 26px; }
+    .brand b { font-family: var(--pixel); font-size: 15px; letter-spacing: 2px; color: var(--ink-d); }
+    .topnav nav { display: flex; gap: 20px; align-items: center; }
+    .topnav nav a { font-size: 13px; color: var(--muted-d); letter-spacing: .3px; }
+    .topnav nav a:hover { color: var(--ink-d); }
+
+    .pitch-body { margin: auto 0; } /* center vertically between the top nav and the bottom edge */
+
+    /* the chunky pixel headline with a colored extrude per line (model-tier colors) */
+    h1.title {
+      font-family: var(--pixel); margin: 0 0 26px; color: var(--ink-d);
+      font-size: clamp(26px, 3.6vw, 50px); line-height: 1.12; letter-spacing: 1px;
+    }
+    h1.title span { display: block; white-space: nowrap; }
+    h1.title .l1 { text-shadow: 3px 3px 0 var(--cyan-d); }   /* line 1 — Sonnet cyan */
+    h1.title .l3 { text-shadow: 3px 3px 0 var(--green-d); }  /* line 2 — Haiku green */
+
+    .lede { font-size: clamp(15px, 1.4vw, 17px); color: var(--ink-d); max-width: 44ch; margin: 0 0 8px; }
+    .lede b { color: var(--green-d); }
+
+    /* terminal install box on cream */
+    .install {
+      display: inline-flex; align-items: stretch; border: 2px solid var(--ink-d); border-radius: 6px;
+      overflow: hidden; background: #15181f; box-shadow: 4px 4px 0 rgba(20,24,31,.18);
+    }
+    .install code {
+      font-family: var(--mono); font-size: 14px; color: #e8edf6; padding: 13px 16px;
+      display: flex; align-items: center; gap: 9px; white-space: nowrap;
+    }
+    .install code .d { color: var(--green); }
+    .install button {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+      border: none; border-left: 2px solid #2a2f3a; background: #1d212b; color: var(--cyan);
+      padding: 0 15px; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .install button:hover { background: #262b37; color: #fff; }
+    .install button.copied { color: var(--green); }
+
+    /* ---- right: the live office ---- */
+    .stage {
+      position: relative; overflow: hidden;
+      background: linear-gradient(180deg, #0b0f18, #0a0d14);
+    }
+    /* CRT scanlines + vignette, over the office for a screen-feel */
+    .stage::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+      background:
+        repeating-linear-gradient(0deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px),
+        radial-gradient(130% 110% at 50% 35%, transparent 55%, rgba(0,0,0,.55) 100%);
+      mix-blend-mode: multiply;
+    }
+    /* the live office — the right panel's sole focus (real renderer, synthetic cast, never empty) */
+    .office-embed { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; z-index: 1; }
+
+    /* ============================== sections below ============================== */
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    section.band { padding: 84px 0; position: relative; }
+    .band-head { text-align: center; margin-bottom: 44px; }
+    .band-head h2 { font-family: var(--pixel); font-size: clamp(16px, 2.4vw, 24px); color: #fff; letter-spacing: 1px;
+      margin: 16px 0 0; text-shadow: 3px 3px 0 #11192a; }
+    .band-head p { color: var(--muted); max-width: 56ch; margin: 14px auto 0; }
+
+    /* get started: install steps */
+    .steps { list-style: none; margin: 0 auto; padding: 0; max-width: 600px; display: grid; gap: 18px; }
+    .steps li { display: grid; grid-template-columns: 36px 1fr; gap: 16px; align-items: start; }
+    .step-n { font-family: var(--pixel); font-size: 13px; color: #06270f; background: var(--green);
+      width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; }
+    .step-body h4 { font-family: var(--pixel); font-size: 11px; letter-spacing: 1px; color: #fff;
+      text-transform: uppercase; margin: 6px 0 8px; }
+    .step-body p { color: var(--muted); margin: 0; font-size: 14px; }
+    .step-body p b { color: var(--ink); font-weight: 500; }
+    .step-body p code { color: var(--cyan); }
+    .step-cmd { margin-top: 12px; display: inline-block; border: 1px solid var(--line); border-radius: 6px;
+      background: #0b0f18; padding: 9px 14px; }
+    .step-cmd code { font-family: var(--mono); font-size: 13.5px; color: var(--ink); }
+    .step-cmd code .d { color: var(--green); }
+    /* get-started closing CTA: lead with the "tell your agent" prompt, then manual steps */
+    .getstarted { background: var(--bg2); border-top: 1px solid var(--line); }
+    .agent-cta { max-width: 600px; margin: 0 auto; text-align: center; }
+    .agent-cta-l { color: var(--ink); font-size: 14px; margin: 0 0 14px; }
+    .install.flow { display: flex; max-width: 100%; border-color: var(--line); box-shadow: 0 0 28px rgba(57,217,138,.08); }
+    .install.flow code { display: block; white-space: normal; text-align: left; flex: 1; line-height: 1.6; }
+    .install.flow code b { color: var(--green); font-weight: 600; }
+    .or-self { text-align: center; color: var(--muted2); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+      margin: 40px auto 26px; max-width: 600px; position: relative; }
+    .or-self::before, .or-self::after { content: ""; position: absolute; top: 50%; width: 32%; height: 1px; background: var(--line); }
+    .or-self::before { left: 0; } .or-self::after { right: 0; }
+
+    /* hero "works with" — monochrome logo marks in clean tiles */
+    .works { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .works-l { font-size: 11px; color: var(--muted-d); text-transform: uppercase; letter-spacing: 1.5px; margin-right: 4px; }
+    .logo { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px;
+      border: 1px solid var(--line-d); border-radius: 10px; background: rgba(20,24,31,.03); color: var(--ink-d);
+      transition: border-color .15s, transform .15s; }
+    .logo svg { width: 24px; height: 24px; display: block; }
+    .logo:hover { border-color: var(--ink-d); transform: translateY(-2px); }
+
+    /* the reel — large, native 16:9, shown whole (letterbox bars included, never cropped) */
+    .reel-band .wrap { max-width: 1500px; }
+    .reel-frame { width: min(1500px, 94vw); margin: 0 auto; aspect-ratio: 16 / 9; position: relative;
+      border: 2px solid var(--line); border-radius: 14px; overflow: hidden;
+      background: #0a0d14 url(poster.jpg) center/contain no-repeat;
+      box-shadow: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(92,208,255,.06); }
+    .reel-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    .reel-frame::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
+    .reel-sound { position: absolute; right: 14px; bottom: 14px; z-index: 5; display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 11px; letter-spacing: .5px; color: #e8edf6; cursor: pointer;
+      background: rgba(11,15,24,.82); border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; backdrop-filter: blur(4px); }
+    .reel-sound svg { width: 14px; height: 14px; color: var(--cyan); }
+    .reel-sound .waves { display: none; }
+    .reel-sound:not(.muted) .waves { display: block; }
+    .reel-sound:hover { border-color: var(--cyan); }
+
+    /* faq (native <details> accordion) */
+    .faq-wrap { max-width: 760px; }
+    .faq { border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin-bottom: 12px; overflow: hidden; }
+    .faq summary { cursor: pointer; padding: 16px 20px; font-size: 14.5px; color: var(--ink); list-style: none;
+      display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: "+"; color: var(--muted); font-size: 18px; line-height: 1; }
+    .faq[open] summary { color: #fff; }
+    .faq[open] summary::after { content: "−"; }
+    .faq-a { padding: 0 20px 18px; }
+    .faq-a p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+    .faq-a b { color: var(--ink); font-weight: 500; }
+    .faq-a code { color: var(--cyan); } .faq-a a { color: var(--cyan); }
+
+    /* neon feature cards — aligned, equal-height */
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: stretch; }
+    .fcard {
+      background: linear-gradient(180deg, var(--card), var(--card2));
+      border: 1px solid var(--line); border-radius: 12px; padding: 22px 22px 26px; position: relative;
+    }
+    .fcard .tag { font-family: var(--pixel); font-size: 8px; letter-spacing: 2px; color: var(--muted);
+      text-transform: uppercase; }
+    .fcard .glyph { width: 56px; height: 56px; margin: 18px 0 16px; }
+    .fcard .glyph svg { width: 100%; height: 100%; }
+    .fcard.cyan .glyph svg { color: var(--cyan); filter: drop-shadow(0 0 10px rgba(92,208,255,.55)); }
+    .fcard.green .glyph svg { color: var(--green); filter: drop-shadow(0 0 10px rgba(57,217,138,.55)); }
+    .fcard.gold .glyph svg { color: var(--gold); filter: drop-shadow(0 0 10px rgba(255,209,102,.55)); }
+    .fcard h3 { font-family: var(--pixel); font-size: 11px; letter-spacing: 1px; color: #fff; text-transform: uppercase; margin: 0 0 10px; }
+    .fcard p { font-size: 13.5px; color: var(--muted); margin: 0; }
+    .fcard p b { color: var(--ink); font-weight: 500; }
+    .fcard .accent { position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; border-radius: 2px; opacity: .8; }
+    .fcard.cyan .accent { background: var(--cyan); } .fcard.green .accent { background: var(--green); } .fcard.gold .accent { background: var(--gold); }
+
+    /* leaderboard — promoted, gold */
+    .lb { background: linear-gradient(180deg, var(--card), var(--card2)); border: 1px solid var(--line);
+      border-radius: 14px; padding: 26px clamp(20px,3vw,32px); max-width: 720px; margin: 0 auto;
+      box-shadow: 0 24px 60px rgba(0,0,0,.45); }
+    .lb-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--line2); padding-bottom: 16px; margin-bottom: 6px; }
+    .lb-head h3 { font-family: var(--pixel); font-size: 13px; letter-spacing: 1px; color: var(--gold);
+      margin: 0; display: flex; align-items: center; gap: 10px; }
+    .lb-head h3 svg { width: 18px; height: 18px; color: var(--gold); }
+    .lb-total { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .lb-row { display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 12px;
+      padding: 11px 10px; border-radius: 6px; font: 14px var(--mono); color: var(--ink); }
+    .lb-row:nth-child(even) { background: var(--card2); }
+    .lb-rank { color: var(--muted); font-weight: 600; }
+    .lb-rank.r1 { color: var(--gold); } .lb-rank.r2 { color: #cbd5e6; } .lb-rank.r3 { color: #d9914f; }
+    .lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lb-val { color: var(--green); text-align: right; white-space: nowrap; }
+    .lb-val span { color: var(--muted); font-size: 11px; }
+    .lb-empty { padding: 30px 8px; text-align: center; color: var(--muted); }
+    .lb-foot { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line2);
+      font-size: 12.5px; color: var(--muted); text-align: center; }
+    .lb-foot code { color: var(--green); }
+
+    /* footer */
+    footer { text-align: center; padding: 60px 24px 56px; color: var(--muted2); font-size: 12px;
+      border-top: 1px solid var(--line); }
+    footer .priv { color: var(--muted); margin-bottom: 12px; display: inline-flex; align-items: center; gap: 8px; }
+    footer .priv svg { width: 14px; height: 14px; color: var(--green); }
+    footer .priv b { color: var(--green); }
+    footer a { color: var(--cyan); }
+
+    /* ============================== responsive ============================== */
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; }
+      .pitch { min-height: auto; padding-bottom: 56px; }
+      .pitch-body { padding-top: 36px; }
+      .stage { min-height: 78vh; }
+      .cards { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      section.band { padding: 60px 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================== HERO ============================== -->
+  <header class="hero">
+    <!-- left: pitch -->
+    <div class="pitch">
+      <div class="topnav">
+        <a class="brand" href="/">
+          <!-- pixel office logo -->
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+            <rect x="2" y="1" width="12" height="14" fill="#14181f"/>
+            <rect x="4" y="3" width="2" height="2" fill="#5cd0ff"/><rect x="7" y="3" width="2" height="2" fill="#ffd166"/><rect x="10" y="3" width="2" height="2" fill="#39d98a"/>
+            <rect x="4" y="6" width="2" height="2" fill="#39d98a"/><rect x="7" y="6" width="2" height="2" fill="#5cd0ff"/><rect x="10" y="6" width="2" height="2" fill="#ff5cba"/>
+            <rect x="4" y="9" width="2" height="2" fill="#ffd166"/><rect x="7" y="9" width="2" height="2" fill="#39d98a"/><rect x="10" y="9" width="2" height="2" fill="#5cd0ff"/>
+            <rect x="6" y="12" width="4" height="3" fill="#0a0d14"/>
+          </svg>
+          <b>AGENCY</b>
+        </a>
+        <nav>
+          <a href="https://github.com/henryz2004/agency" target="_blank" rel="noopener">GitHub ↗</a>
+          <a class="npm" href="https://www.npmjs.com/package/@henryz2004/agency" target="_blank" rel="noopener">npm ↗</a>
+        </nav>
+      </div>
+
+      <div class="pitch-body">
+        <h1 class="title">
+          <span class="l1">WATCH YOUR</span>
+          <span class="l3">AGENTS WORK</span>
+        </h1>
+        <p class="lede">Every coding-agent session becomes a pixel worker at a desk.
+          Measure your tokens as real <b>manpower</b>.</p>
+
+        <div class="install">
+          <code><span class="d">$</span> npx @henryz2004/agency</code>
+          <button id="copyBtn" type="button" aria-label="Copy install command">Copy</button>
+        </div>
+
+        <div class="works">
+          <span class="works-l">Works with</span>
+          <!-- official brand marks (Simple Icons), shown as "works with" compatibility logos -->
+          <span class="logo" role="img" aria-label="Claude Code" title="Claude Code">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+          </span>
+          <span class="logo" role="img" aria-label="OpenAI Codex" title="OpenAI Codex">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654 2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+          </span>
+          <span class="logo" role="img" aria-label="opencode" title="opencode">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22 24H2V0h20zM17 4.8H7v14.4h10z"/></svg>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: the live office (the real renderer + a synthetic cast — never empty) -->
+    <div class="stage">
+      <iframe class="office-embed" src="office-embed.html" tabindex="-1" scrolling="no" loading="eager"
+              title="A live pixel-art office: AI agents at desks, monitors glowing by model tier"></iframe>
+    </div>
+  </header>
+
+  <!-- ============================== the reel (right under the hero) ============================== -->
+  <section class="band reel-band">
+    <div class="wrap">
+      <div class="reel-frame">
+        <video muted loop playsinline preload="metadata" poster="poster.jpg" id="reel"
+               aria-label="Footage from the procedural pixel office">
+          <source src="agency-reel.mp4" type="video/mp4" />
+        </video>
+        <button class="reel-sound muted" id="reelSound" type="button" aria-pressed="false" aria-label="Enable sound">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+            <rect x="2" y="6" width="2" height="4" fill="currentColor"/>
+            <rect x="4" y="5" width="2" height="6" fill="currentColor"/>
+            <rect x="6" y="3" width="2" height="10" fill="currentColor"/>
+            <g class="waves"><rect x="9" y="6" width="1" height="4" fill="currentColor"/><rect x="11" y="4" width="1" height="8" fill="currentColor"/></g>
+          </svg>
+          <span class="reel-sound-l">Sound off</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== what it shows ============================== -->
+  <section class="band" id="whatitshows">
+    <div class="wrap">
+      <div class="band-head">
+        <h2>Read your floor like a team</h2>
+      </div>
+      <div class="cards">
+        <div class="fcard cyan">
+          <span class="tag">// 01</span>
+          <div class="glyph"><svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+            <rect x="1" y="2" width="14" height="9" fill="currentColor" opacity=".18"/>
+            <rect x="2" y="3" width="12" height="7" fill="currentColor"/>
+            <rect x="3" y="4" width="10" height="5" fill="#0a0d14"/>
+            <rect x="4" y="5" width="4" height="1" fill="currentColor"/><rect x="4" y="7" width="6" height="1" fill="currentColor"/>
+            <rect x="6" y="11" width="4" height="2" fill="currentColor"/><rect x="4" y="13" width="8" height="2" fill="currentColor"/>
+          </svg></div>
+          <h3>The Floor</h3>
+          <p>Each agent gets one desk. See their status in <b>real time</b>, and agents are grouped by project.</p>
+          <div class="accent"></div>
+        </div>
+        <div class="fcard green">
+          <span class="tag">// 02</span>
+          <div class="glyph"><svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+            <rect x="2" y="9" width="3" height="5" fill="currentColor"/>
+            <rect x="6" y="6" width="3" height="8" fill="currentColor"/>
+            <rect x="10" y="2" width="3" height="12" fill="currentColor"/>
+            <rect x="2" y="14" width="12" height="1" fill="currentColor" opacity=".5"/>
+          </svg></div>
+          <h3>Your Manpower</h3>
+          <p>Turn your token throughput into <b>human-equivalent team size</b>. See how many engineer-years you shipped and the payroll to match.</p>
+          <div class="accent"></div>
+        </div>
+        <div class="fcard gold">
+          <span class="tag">// 03</span>
+          <div class="glyph"><svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+            <rect x="4" y="2" width="8" height="2" fill="currentColor"/>
+            <rect x="3" y="3" width="10" height="3" fill="currentColor"/>
+            <rect x="2" y="4" width="2" height="2" fill="currentColor"/><rect x="12" y="4" width="2" height="2" fill="currentColor"/>
+            <rect x="6" y="7" width="4" height="3" fill="currentColor"/>
+            <rect x="5" y="10" width="6" height="2" fill="currentColor"/>
+            <rect x="4" y="12" width="8" height="2" fill="currentColor"/>
+          </svg></div>
+          <h3>The Leaderboard</h3>
+          <p>Rank your <b>token-maxxing</b> against everyone else. See how efficient you really are.</p>
+          <div class="accent"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== leaderboard ============================== -->
+  <section class="band" id="leaderboard">
+    <div class="wrap">
+      <div class="band-head">
+        <h2>Climb the board</h2>
+        <p>Standardized engineer-years. Same formula for everyone, no sliders.</p>
+      </div>
+      <div class="lb">
+        <div class="lb-head">
+          <h3>
+            <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+              <rect x="4" y="2" width="8" height="2" fill="currentColor"/><rect x="3" y="3" width="10" height="3" fill="currentColor"/>
+              <rect x="2" y="4" width="2" height="2" fill="currentColor"/><rect x="12" y="4" width="2" height="2" fill="currentColor"/>
+              <rect x="6" y="7" width="4" height="3" fill="currentColor"/><rect x="5" y="10" width="6" height="2" fill="currentColor"/><rect x="4" y="12" width="8" height="2" fill="currentColor"/>
+            </svg>
+            Engineer-years shipped
+          </h3>
+          <span class="lb-total" id="lbTotal">loading…</span>
+        </div>
+        <div class="lb-list" id="lbList"><div class="lb-empty">Loading the floor…</div></div>
+        <p class="lb-foot">Join from your dashboard after <code>npx @henryz2004/agency</code>.
+          Opt in once and your rank moves as you ship.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== faq ============================== -->
+  <section class="band" id="faq">
+    <div class="wrap faq-wrap">
+      <div class="band-head">
+        <h2>Good questions</h2>
+      </div>
+      <details class="faq">
+        <summary>How does Agency know what my agents are doing?</summary>
+        <div class="faq-a"><p>It reads your <b>local</b> agent data, read-only. For Claude Code it watches the
+          per-session heartbeat files under <code>~/.claude/sessions</code> and the transcripts under
+          <code>~/.claude/projects</code>; for Codex it reads <code>~/.codex</code>; for opencode, its local
+          database. It cross-references running process IDs to tell which sessions are live and whether each is
+          <b>working</b>, running a <b>shell</b> command, or <b>idle</b>. It never executes, edits, or uploads anything.</p></div>
+      </details>
+      <details class="faq">
+        <summary>Does any of my code or prompts leave my machine?</summary>
+        <div class="faq-a"><p>No. Everything runs locally at <code>localhost:4313</code>. The only thing that can
+          leave is what you explicitly opt into on the leaderboard: a display name and one number (your
+          standardized engineer-years). Never code, prompts, or transcripts.</p></div>
+      </details>
+      <details class="faq">
+        <summary>Which agents are supported?</summary>
+        <div class="faq-a"><p><b>Claude Code</b>, <b>Codex</b>, and <b>opencode</b>. Auto-discovered, zero config.
+          If a tool isn't installed, Agency simply shows no workers for it.</p></div>
+      </details>
+      <details class="faq">
+        <summary>Do I need to configure anything?</summary>
+        <div class="faq-a"><p>No. One <code>npx</code> command, no build, no dependencies, no API keys. It finds
+          your agents' local data automatically.</p></div>
+      </details>
+      <details class="faq">
+        <summary>Is it free and open source?</summary>
+        <div class="faq-a"><p>Yes. MIT-licensed and on
+          <a href="https://github.com/henryz2004/agency" target="_blank" rel="noopener">GitHub</a>.</p></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============================== get started (closing CTA) ============================== -->
+  <section class="band getstarted" id="getstarted">
+    <div class="wrap">
+      <div class="band-head">
+        <h2>Spin up your office</h2>
+      </div>
+
+      <div class="agent-cta">
+        <p class="agent-cta-l">Tell your coding agent to set it up:</p>
+        <div class="install flow">
+          <code><span class="d">»</span> Install and run <b>npx @henryz2004/agency</b>, then open localhost:4313 so I can watch you work.</code>
+          <button id="copyPrompt" type="button" aria-label="Copy agent prompt">Copy</button>
+        </div>
+      </div>
+
+      <p class="or-self">or do it yourself</p>
+      <ol class="steps">
+        <li>
+          <span class="step-n">1</span>
+          <div class="step-body">
+            <h4>Run it</h4>
+            <p>One <code>npx</code> command.</p>
+            <div class="step-cmd"><code><span class="d">$</span> npx @henryz2004/agency</code></div>
+          </div>
+        </li>
+        <li>
+          <span class="step-n">2</span>
+          <div class="step-body">
+            <h4>Open the office</h4>
+            <p>It serves a dashboard at <b>localhost:4313</b>. Everything stays local.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-n">3</span>
+          <div class="step-body">
+            <h4>Start coding</h4>
+            <p>Run your agents and they appear as pixel workers within <b>~3 seconds</b>, typing while busy.</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ============================== footer ============================== -->
+  <footer>
+    <p class="priv">
+      <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+        <rect x="4" y="2" width="8" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <rect x="3" y="7" width="10" height="7" fill="currentColor"/><rect x="7" y="9" width="2" height="3" fill="#0a0d14"/>
+      </svg>
+      <span><b>Nothing leaves your machine</b> unless you opt into the leaderboard, and even then only a display name + one number.</span>
+    </p>
+    <p>MIT · <a href="https://github.com/henryz2004/agency" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://www.npmjs.com/package/@henryz2004/agency" target="_blank" rel="noopener">npm</a> ·
+      a pixel office for your AI workforce</p>
+  </footer>
+
+  <script>
+    // --- copy-to-clipboard buttons (install command + the "tell your agent" prompt) ---
+    function wireCopy(btnId, text) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(text); } catch { return; }
+        btn.textContent = 'Copied'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
+      });
+    }
+    wireCopy('copyBtn', 'npx @henryz2004/agency');
+    wireCopy('copyPrompt', 'Install and run npx @henryz2004/agency, then open localhost:4313 so I can watch you work.');
+
+    // --- reel: play once scrolled into view (not under reduced-motion); user can enable sound ---
+    {
+      const reel = document.getElementById('reel');
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reel && !reduce && 'IntersectionObserver' in window) {
+        new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) reel.play?.().catch(() => {});
+            else reel.pause?.();
+          }
+        }, { threshold: 0.4 }).observe(reel);
+      }
+      const soundBtn = document.getElementById('reelSound');
+      if (reel && soundBtn) {
+        soundBtn.addEventListener('click', () => {
+          reel.muted = !reel.muted;
+          soundBtn.classList.toggle('muted', reel.muted);
+          soundBtn.setAttribute('aria-pressed', String(!reel.muted));
+          soundBtn.querySelector('.reel-sound-l').textContent = reel.muted ? 'Sound off' : 'Sound on';
+          if (!reel.muted) reel.play?.().catch(() => {}); // unmuting counts as a user gesture
+        });
+      }
+    }
+
+    // --- leaderboard section (the hero is the live office; the board lives here) ---
+    const fmtEY = (n) => { n = Number(n) || 0; return n >= 10 ? Math.round(n).toString() : n.toFixed(n >= 1 ? 1 : 2); };
+    const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+    async function load() {
+      const list = document.getElementById('lbList');
+      if (!list) return;
+      let data;
+      try {
+        const res = await fetch('/api/leaderboard?limit=50');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        data = await res.json();
+      } catch {
+        set('lbTotal', '');
+        list.innerHTML = '<div class="lb-empty">Leaderboard unavailable right now.</div>';
+        return;
+      }
+      const top = Array.isArray(data.top) ? data.top : [];
+      const total = data.total || 0;
+      set('lbTotal', total ? total + (total === 1 ? ' office' : ' offices') : '');
+
+      if (!top.length) {
+        list.innerHTML = '<div class="lb-empty">No one’s joined yet. Be the first.</div>';
+        return;
+      }
+      list.innerHTML = '';
+      for (const row of top) {
+        const r = document.createElement('div'); r.className = 'lb-row';
+        const rank = document.createElement('span');
+        rank.className = 'lb-rank' + (row.rank <= 3 ? ' r' + row.rank : '');
+        rank.textContent = '#' + row.rank;
+        const name = document.createElement('span'); name.className = 'lb-name';
+        name.textContent = row.handle; // textContent = no injection (server also strips < >)
+        const val = document.createElement('span'); val.className = 'lb-val';
+        val.textContent = fmtEY(row.engYears) + ' eng-yrs';
+        val.title = fmtTok(row.outputTokens) + ' output tokens' +
+          (row.sources && row.sources.length ? ' · ' + row.sources.join(', ') : '');
+        r.append(rank, name, val);
+        list.appendChild(r);
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
