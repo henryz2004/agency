@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getUsage } from './lib/usage.js';
 import { getLive } from './lib/live.js';
+import { installInfo } from './lib/install.js';
 import { identityFor, overrideFor, setOverride } from './lib/roster.js';
 import { getTranscript } from './lib/transcript.js';
 import * as control from './lib/control.js';
@@ -18,6 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4313;
 const HOST = process.env.HOST || '127.0.0.1';
+// Which leaderboard backend the dashboard talks to. Override per-run for
+// local/staging (LEADERBOARD_API=http://localhost:8787 npm start); defaults to
+// the production Worker. Injected into the page via /env.js — replaces the old
+// sticky localStorage override (a stale value silently broke the prod board).
+const LEADERBOARD_API = process.env.LEADERBOARD_API || 'https://agency-leaderboard.henryz2004.workers.dev';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -65,11 +71,27 @@ function buildState() {
     return { ...a, ...ident, ...ctrl, name: ov.name || ident.name, hidden: ov.hidden };
   });
 
+  // Leaderboard ranks output SINCE you joined Agency, not your whole Claude
+  // history — so surface a per-install slice alongside the lifetime totals.
+  const { day: installedDay } = installInfo();
+  const sinceInstall = sumSince(usage.daily, installedDay);
+
   return {
     generatedAt: Date.now(),
     live: { agents, teams: live.teams, now: live.now },
-    usage,
+    usage: { ...usage, installedDay, sinceInstall },
   };
+}
+
+// Sum output tokens (+ active days) on or after the install day. Daily bucket
+// dates are local YYYY-MM-DD (en-CA), so a lexical >= compares correctly.
+function sumSince(daily, day) {
+  let out = 0;
+  let days = 0;
+  for (const d of daily || []) {
+    if (d.date >= day) { out += d.out || 0; days += 1; }
+  }
+  return { out, days };
 }
 
 function sendJSON(res, code, obj) {
@@ -334,6 +356,13 @@ const server = http.createServer((req, res) => {
           sendJSON(res, 500, { ok: false, error: String(err && err.message ? err.message : err) });
         }
       });
+      return;
+    }
+    // Runtime config for the frontend (classic script → runs before the deferred
+    // leaderboard module). Lets server-side env reach the browser with no build step.
+    if (pathname === '/env.js') {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(`window.AGENCY_LEADERBOARD_API=${JSON.stringify(LEADERBOARD_API)};`);
       return;
     }
     serveStatic(req, res);

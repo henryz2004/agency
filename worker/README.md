@@ -28,10 +28,14 @@ deploy — it's served straight from a public R2 bucket
 by absolute URL in `site/index.html`). To replace it: `wrangler r2 object put
 agency-assets/agency-reel.mp4 --file=… --remote`.
 
-Then point the dashboard at it: set `LEADERBOARD_API` at the top of
-`public/leaderboard.js` to the deployed URL (e.g.
-`https://agency-leaderboard.<you>.workers.dev`). Until that's set, the dashboard
-hides the leaderboard UI and runs exactly as before (fail-soft).
+The dashboard talks to the **production** board by default. To point it at your
+own Worker (a fork) or a local one, set the `LEADERBOARD_API` env var when
+starting the dashboard — `server.js` injects it into the page via `/env.js`:
+
+```bash
+LEADERBOARD_API=https://agency-leaderboard.<you>.workers.dev npm start   # your deploy
+LEADERBOARD_API=http://localhost:8787 npm start                          # local wrangler dev
+```
 
 ## Endpoints
 
