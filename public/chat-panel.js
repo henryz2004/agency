@@ -312,50 +312,70 @@ function customizeControls(a) {
   // Gate: only render for a selectable real agent carrying a sessionId.
   if (!a || !a.sessionId) return null;
 
-  // One compact row: a slim rename field + Save, then a small hide toggle.
   const wrap = document.createElement('div');
   wrap.className = 'cp-customize cp-cust-row';
 
-  // --- rename: input pre-filled with the current name + a Save button. Saving
-  // an empty input clears the custom name (server resets to the minted name). ---
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'cp-cust-input';
-  input.value = a.name || '';
-  input.placeholder = 'Rename…';
-  input.title = 'Rename this agent (clear to reset to its minted name)';
-  const save = document.createElement('button');
-  save.type = 'button';
-  save.className = 'cp-cust-save';
-  save.textContent = 'Save';
-  save.title = 'Save the new name';
-  const submitName = () => postOverride(save, { sessionId: a.sessionId, name: input.value.trim() }, 'Save');
-  save.addEventListener('click', submitName);
-  // Enter in the field saves too (blur is left alone so tabbing away is quiet).
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); submitName(); }
-  });
-  wrap.appendChild(input);
-  wrap.appendChild(save);
-
-  // --- hide: a small icon toggle reflecting agent.hidden. Optimistically flips
-  // its own glyph/label; the next /api/state poll reflects the real state. ---
+  // --- hide: a quiet text toggle reflecting agent.hidden (no uncanny eyeball).
+  // Optimistically flips its own label; the next /api/state poll reconciles. ---
   const hide = document.createElement('button');
   hide.type = 'button';
-  hide.className = 'cp-cust-hide';
-  const labelFor = (hidden) => (hidden ? '🙈' : '👁');
-  const titleFor = (hidden) => (hidden ? 'Unhide — show on the floor again' : 'Hide this agent from the office floor');
-  hide.textContent = labelFor(a.hidden);
-  hide.title = titleFor(a.hidden);
+  hide.className = 'cp-cust-act';
+  const hideLabel = (hidden) => (hidden ? 'Unhide' : 'Hide');
+  const hideTitle = (hidden) => (hidden ? 'Show on the floor again' : 'Hide this agent from the office floor');
+  hide.textContent = hideLabel(a.hidden);
+  hide.title = hideTitle(a.hidden);
   hide.addEventListener('click', () => {
     const next = !a.hidden;
     a.hidden = next; // optimistic; office.js reconciles on the next poll
-    const prev = labelFor(next);
-    hide.title = titleFor(next);
-    postOverride(hide, { sessionId: a.sessionId, hidden: next }, prev);
+    hide.title = hideTitle(next);
+    postOverride(hide, { sessionId: a.sessionId, hidden: next }, hideLabel(next));
   });
-  wrap.appendChild(hide);
 
+  // --- rename: collapsed to a quiet button so the field isn't always live.
+  // Clicking expands the strip in place to an input + Save + cancel. ---
+  const rename = document.createElement('button');
+  rename.type = 'button';
+  rename.className = 'cp-cust-act';
+  rename.textContent = '✎ Rename';
+  rename.title = 'Rename this agent';
+  rename.addEventListener('click', openRename);
+
+  const collapse = () => { wrap.innerHTML = ''; wrap.append(rename, hide); };
+
+  function openRename() {
+    wrap.innerHTML = '';
+    // Input pre-filled with the current name; saving an empty value clears the
+    // custom name (server resets to the minted roster name).
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'cp-cust-input';
+    input.value = a.name || '';
+    input.placeholder = 'Rename…';
+    input.title = 'Rename this agent (clear to reset to its minted name)';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'cp-cust-save';
+    save.textContent = 'Save';
+    save.title = 'Save the new name';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'cp-cust-cancel';
+    cancel.textContent = '✕';
+    cancel.title = 'Cancel rename';
+    const submitName = () => postOverride(save, { sessionId: a.sessionId, name: input.value.trim() }, 'Save');
+    save.addEventListener('click', submitName);
+    cancel.addEventListener('click', collapse);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submitName(); }
+      // Esc collapses the field; stopPropagation so it doesn't also close the panel.
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); collapse(); }
+    });
+    wrap.append(input, save, cancel);
+    input.focus();
+    input.select();
+  }
+
+  collapse();
   return wrap;
 }
 

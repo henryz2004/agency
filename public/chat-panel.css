@@ -345,10 +345,36 @@
   opacity: 0.6;
   cursor: default;
 }
-/* hide: a small icon toggle (👁 / 🙈) — quiet, square-ish, sits beside Save */
-.cp-cust-hide {
+/* rename + hide actions: quiet ghost-text buttons in the collapsed strip. Rename
+   expands to the input + Save in place; Hide toggles here. */
+.cp-cust-act {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-family: var(--term);
+  font-size: var(--t-sub);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.cp-cust-act:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+.cp-cust-act.ok {
+  color: var(--green);
+  border-color: var(--green);
+}
+.cp-cust-act:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* cancel (✕) on the expanded rename strip — dismiss back to the collapsed row */
+.cp-cust-cancel {
+  flex: 0 0 auto;
+  font-size: var(--t-sub);
   line-height: 1;
   color: var(--muted);
   background: transparent;
@@ -357,18 +383,10 @@
   padding: 0 8px;
   cursor: pointer;
 }
-.cp-cust-hide:hover {
+.cp-cust-cancel:hover {
   color: var(--ink);
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.04);
-}
-.cp-cust-hide.ok {
-  color: var(--green);
-  border-color: var(--green);
-}
-.cp-cust-hide:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 /* "needs you" HUD pill (Control Phase-1): a non-intrusive topbar chip counting

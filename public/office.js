@@ -31,6 +31,7 @@ let avatar = null;                  // the player (created in initOffice, off by
 let lastT = 0;                      // last loop timestamp → real dt for motion
 let walkBtn = null, walkHint = null; // on-screen walk-mode affordances (built in JS)
 let nameBtn = null;                  // on-screen nametag-visibility toggle
+let menuBtn = null, menuPanel = null; // ☰ floor-controls menu (holds the toggles)
 let labelsHidden = false;            // hide all agent name chips when true ('n' / button)
 // roaming pet: dir +1 faces right; sit→sleep when it rests a while; `petted` is
 // set while the walking avatar is right next to it (→ wakes + hearts in drawCat).
@@ -572,34 +573,24 @@ function syncLabels() {
   syncHiddenChip();
 }
 
-// A small floor control showing how many desks the user has hidden, toggling
-// them back into view. The hidden STATE is owned by app.js (agent.hidden); proc
-// just collapses them by default and offers a local reveal (no poll needed —
-// rebuild() re-filters lastAll). Anchored to the floor-frame, not the scaled
-// label layer, so it stays a crisp, fixed-size control.
+// The "show hidden desks" control is a row INSIDE the ☰ floor menu (built in
+// ensureWalkUI). The hidden STATE is owned by app.js (agent.hidden); proc just
+// collapses them by default and offers a local reveal (no poll needed —
+// rebuild() re-filters lastAll). This just shows/labels the row by hiddenCount.
 let hiddenChip = null;
 function syncHiddenChip() {
-  const host = world && world.parentElement;
-  if (!host) return;
-  if (!hiddenChip) {
-    hiddenChip = document.createElement('button');
-    hiddenChip.type = 'button';
-    hiddenChip.style.cssText =
-      'position:absolute;left:12px;top:12px;z-index:8;cursor:pointer;' +
-      'appearance:none;-webkit-appearance:none;outline:none;' +
-      'padding:3px 9px;border-radius:11px;white-space:nowrap;' +
-      'background:rgba(14,20,32,0.9);border:1px solid rgba(255,255,255,0.22);' +
-      "font:11px 'IBM Plex Mono', ui-monospace, monospace;color:#cdd8ea;letter-spacing:.3px;";
-    hiddenChip.addEventListener('click', () => { showHidden = !showHidden; rebuild(); });
-    host.appendChild(hiddenChip);
-  }
+  if (!hiddenChip) return; // built lazily in ensureWalkUI
   // count emptied → also drop the reveal flag, else a future hide would stay
-  // visible with no chip to re-collapse it (the chip is gone at count 0).
-  if (!hiddenCount) { showHidden = false; hiddenChip.style.display = 'none'; return; }
-  hiddenChip.style.display = 'inline-block';
+  // revealed with no way to re-collapse it; hide the row when nothing's hidden.
+  if (!hiddenCount) {
+    showHidden = false;
+    hiddenChip.style.display = 'none';
+    return;
+  }
+  hiddenChip.style.display = 'block';
   hiddenChip.textContent = showHidden
-    ? `▾ hide ${hiddenCount} hidden`
-    : `▸ ${hiddenCount} away · show`;
+    ? `▾ Hide ${hiddenCount} hidden`
+    : `▸ Show ${hiddenCount} hidden`;
 }
 
 // ---- camera: pan / zoom / click-to-select -----------------------------------
@@ -1057,7 +1048,7 @@ function updateWalkUI() {
   const on = !!(avatar && avatar.enabled);
   if (walkBtn) {
     walkBtn.textContent = on ? '🚶 walking · G to exit' : '🚶 walk (G)';
-    walkBtn.style.borderColor = on ? '#ff2e88' : 'rgba(255,255,255,0.14)';
+    walkBtn.style.borderColor = on ? '#ff2e88' : 'transparent'; // a menu row: framed only when active
     walkBtn.style.color = on ? '#ff8fc4' : '#cdd6e6';
   }
   if (walkHint) walkHint.style.display = on ? 'block' : 'none';
@@ -1076,41 +1067,89 @@ function updateLabelBtn() {
   nameBtn.style.opacity = labelsHidden ? '0.6' : '1';
 }
 
-// Build the small walk affordances (a toggle button + a hint) over the floor
-// frame, styled inline (index.html / style.css aren't in this lane).
+// Build the floor controls over the floor frame, styled inline (index.html /
+// style.css aren't in this lane). A ☰ button top-left opens a small dropdown
+// holding the toggles (name tags, walk mode, show-hidden) so they don't clutter
+// the floor corners. The walk HINT stays a free-floating strip while walking.
 function ensureWalkUI() {
   const host = world && world.parentElement; // .floor-frame
-  if (!host || walkBtn) return;
-  walkBtn = document.createElement('button');
-  walkBtn.type = 'button';
-  walkBtn.id = 'walkToggle';
-  Object.assign(walkBtn.style, {
-    position: 'absolute', left: '12px', bottom: '12px', zIndex: '6',
-    font: '11px ui-monospace, monospace', background: 'rgba(16,20,28,0.82)',
-    border: '1px solid rgba(255,255,255,0.14)', borderRadius: '6px',
-    padding: '5px 9px', cursor: 'pointer',
+  if (!host || menuBtn) return;
+
+  // ☰ hamburger — toggles the dropdown.
+  menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.id = 'floorMenu';
+  menuBtn.textContent = '☰';
+  menuBtn.title = 'Floor controls';
+  menuBtn.setAttribute('aria-label', 'Floor controls');
+  Object.assign(menuBtn.style, {
+    position: 'absolute', left: '12px', top: '12px', zIndex: '8',
+    font: '13px ui-monospace, monospace', lineHeight: '1', color: '#cdd6e6',
+    background: 'rgba(16,20,28,0.82)', border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: '6px', padding: '6px 9px', cursor: 'pointer',
   });
-  walkBtn.addEventListener('click', () => toggleWalk());
-  host.appendChild(walkBtn);
-  // nametag-visibility toggle (top-left, clear of the bottom controls)
-  nameBtn = document.createElement('button');
-  nameBtn.type = 'button';
-  nameBtn.id = 'nameToggle';
+  host.appendChild(menuBtn);
+
+  // Dropdown panel (hidden until ☰ clicked).
+  menuPanel = document.createElement('div');
+  Object.assign(menuPanel.style, {
+    position: 'absolute', left: '12px', top: '44px', zIndex: '8',
+    display: 'none', flexDirection: 'column', gap: '2px', minWidth: '150px',
+    background: 'rgba(14,20,32,0.96)', border: '1px solid rgba(255,255,255,0.16)',
+    borderRadius: '8px', padding: '5px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+  });
+  host.appendChild(menuPanel);
+
+  const isOpen = () => menuPanel.style.display !== 'none';
+  const setOpen = (on) => {
+    menuPanel.style.display = on ? 'flex' : 'none';
+    menuBtn.style.borderColor = on ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.14)';
+  };
+  menuBtn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!isOpen()); });
+  // Click-outside / Esc dismisses the menu (added once; ensureWalkUI is idempotent).
+  document.addEventListener('click', (e) => {
+    if (isOpen() && e.target !== menuBtn && !menuPanel.contains(e.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) setOpen(false); });
+
+  // A menu row button: full-width, left-aligned, subtle hover. The per-control
+  // update fns (updateLabelBtn / updateWalkUI / syncHiddenChip) own text + active
+  // color; hover only touches background, so they don't fight.
+  const makeRow = (id) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    if (id) b.id = id;
+    Object.assign(b.style, {
+      font: '11px ui-monospace, monospace', textAlign: 'left', width: '100%',
+      color: '#cdd6e6', background: 'transparent', border: '1px solid transparent',
+      borderRadius: '5px', padding: '6px 8px', cursor: 'pointer', whiteSpace: 'nowrap',
+    });
+    b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,0.06)'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
+    menuPanel.appendChild(b);
+    return b;
+  };
+
+  // Name-tags toggle.
+  nameBtn = makeRow('nameToggle');
   nameBtn.title = 'Show / hide agent name tags (N)';
-  Object.assign(nameBtn.style, {
-    // sits just below the top-left "N away · show" hidden-agents chip (which also
-    // anchors top-left), so the two stack instead of overlapping.
-    position: 'absolute', left: '12px', top: '40px', zIndex: '6',
-    font: '11px ui-monospace, monospace', background: 'rgba(16,20,28,0.82)',
-    border: '1px solid rgba(255,255,255,0.14)', borderRadius: '6px',
-    padding: '5px 9px', cursor: 'pointer', color: '#cdd6e6',
-  });
   nameBtn.addEventListener('click', () => toggleLabels());
-  host.appendChild(nameBtn);
   updateLabelBtn();
+
+  // Walk-mode toggle.
+  walkBtn = makeRow('walkToggle');
+  walkBtn.addEventListener('click', () => toggleWalk());
+
+  // Show-hidden toggle — syncHiddenChip shows/labels it only when desks are hidden.
+  hiddenChip = makeRow();
+  hiddenChip.addEventListener('click', () => { showHidden = !showHidden; rebuild(); });
+  syncHiddenChip();
+
+  // Walk hint — a free-floating strip bottom-left, shown only while walking.
   walkHint = document.createElement('div');
   Object.assign(walkHint.style, {
-    position: 'absolute', left: '12px', bottom: '40px', zIndex: '6',
+    // bottom:48 clears the #recenter button (bottom:12) when both show while walking.
+    position: 'absolute', left: '12px', bottom: '48px', zIndex: '6',
     font: '11px ui-monospace, monospace', color: '#9aa6ba',
     background: 'rgba(16,20,28,0.82)', border: '1px solid rgba(255,255,255,0.10)',
     borderRadius: '6px', padding: '4px 8px', display: 'none', maxWidth: '250px',
