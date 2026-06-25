@@ -40,6 +40,7 @@ hides the leaderboard UI and runs exactly as before (fail-soft).
 | POST   | `/api/submit`      | `{ installId, handle, outputTokens, sources? }`| `{ ok, rank, total, engYears }` · `409 { error:"handle taken" }` if another install owns that name |
 | GET    | `/api/leaderboard` | `?limit=100` (max 500)                         | `{ total, top: [...] }`          |
 | GET    | `/api/rank`        | `?installId=...`                               | `{ rank, total, engYears }`      |
+| GET    | `/api/stats`       | —                                              | `{ total, active7d, bySource, engYears:{sum,max,avg} }` — aggregate pulse, no rows/PII |
 
 ## Local dev
 

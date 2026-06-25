@@ -58,6 +58,14 @@ export default {
         const handle = cleanHandle(body.handle);
         if (!handle) return json({ error: 'invalid handle' }, 400);
 
+        // Dedupe display names across installs (case-insensitive; handles are
+        // already trimmed by cleanHandle). Your own install_id may keep its name
+        // on re-submit, but another install can't claim a name that's taken.
+        const taken = await env.DB.prepare(
+          `SELECT 1 FROM scores WHERE handle = ?1 COLLATE NOCASE AND install_id <> ?2 LIMIT 1`
+        ).bind(handle, installId).first();
+        if (taken) return json({ error: 'handle taken' }, 409);
+
         if (typeof body.outputTokens !== 'number' || !Number.isFinite(body.outputTokens)) {
           return json({ error: 'invalid outputTokens' }, 400);
         }
@@ -72,13 +80,23 @@ export default {
         const engYears = outputTokens / TOKENS_PER_ENG_YEAR;
         const now = Date.now();
 
-        await env.DB.prepare(
-          `INSERT INTO scores (install_id, handle, output_tokens, eng_years, sources, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
-           ON CONFLICT(install_id) DO UPDATE SET
-             handle=excluded.handle, output_tokens=excluded.output_tokens,
-             eng_years=excluded.eng_years, sources=excluded.sources, updated_at=excluded.updated_at`
-        ).bind(installId, handle, outputTokens, engYears, JSON.stringify(sources), now).run();
+        try {
+          await env.DB.prepare(
+            `INSERT INTO scores (install_id, handle, output_tokens, eng_years, sources, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+             ON CONFLICT(install_id) DO UPDATE SET
+               handle=excluded.handle, output_tokens=excluded.output_tokens,
+               eng_years=excluded.eng_years, sources=excluded.sources, updated_at=excluded.updated_at`
+          ).bind(installId, handle, outputTokens, engYears, JSON.stringify(sources), now).run();
+        } catch (e) {
+          // The handle unique index is the atomic backstop for the dedupe check
+          // above (covers the check-then-insert race). install_id conflicts are
+          // absorbed by ON CONFLICT, so a UNIQUE failure here is always the name.
+          if (/UNIQUE constraint failed/i.test(String(e && e.message))) {
+            return json({ error: 'handle taken' }, 409);
+          }
+          throw e;
+        }
 
         const { rank, total } = await rankFor(env, engYears);
         return json({ ok: true, rank, total, engYears });
@@ -127,6 +145,23 @@ export default {
         }
         await env.DB.prepare(`DELETE FROM scores WHERE install_id=?1`).bind(installId).run();
         return json({ ok: true });
+      }
+
+      // Aggregate pulse — the analytics-without-analytics for a local-only app.
+      // Counts only: how many opted-in installs, how many active recently, the
+      // source mix, and the eng-years spread. NEVER handles, install_ids, or rows.
+      if (pathname === '/api/stats' && request.method === 'GET') {
+        const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM scores`).first('n')) || 0;
+        const since = Date.now() - 7 * 86400000;
+        const active7d = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM scores WHERE updated_at > ?1`).bind(since).first('n')) || 0;
+        const agg = (await env.DB.prepare(`SELECT SUM(eng_years) AS sum, MAX(eng_years) AS max, AVG(eng_years) AS avg FROM scores`).first()) || {};
+        const rows = await env.DB.prepare(`SELECT sources FROM scores`).all();
+        const bySource = {};
+        for (const r of rows.results || []) for (const s of safeParse(r.sources)) bySource[s] = (bySource[s] || 0) + 1;
+        return json({
+          total, active7d, bySource,
+          engYears: { sum: agg.sum || 0, max: agg.max || 0, avg: agg.avg || 0 },
+        });
       }
 
       return json({ error: 'not found' }, 404);
