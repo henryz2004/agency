@@ -549,7 +549,20 @@
     }
 
     // --- leaderboard section (the hero is the live office; the board lives here) ---
-    const fmtEY = (n) => { n = Number(n) || 0; return n >= 10 ? Math.round(n).toString() : n.toFixed(n >= 1 ? 1 : 2); };
+    // Adaptive eng-time units — mirrors fmtEngTime() in public/metric.js so the
+    // public board reads the same as the app ("12 eng-days", not "0 eng-yrs").
+    // ponytail: inlined, not imported — this page is standalone static assets.
+    const fmtEY = (engYears) => {
+      const ey = Number(engYears) || 0;
+      const EY = { yr: 1, mo: 1 / 12, day: 1 / 230, hr: 1 / (230 * 8) };
+      let value, unit;
+      if (ey >= EY.yr) { value = ey; unit = 'yr'; }
+      else if (ey >= EY.mo) { value = ey / EY.mo; unit = 'mo'; }
+      else if (ey >= EY.day) { value = ey / EY.day; unit = 'day'; }
+      else { value = ey / EY.hr; unit = 'hr'; }
+      const v = value >= 10 ? Math.round(value).toString() : (Math.round(value * 10) / 10).toString();
+      return `${v} eng-${unit}${v === '1' ? '' : 's'}`;
+    };
     const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
     const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
 
@@ -583,7 +596,7 @@
         const name = document.createElement('span'); name.className = 'lb-name';
         name.textContent = row.handle; // textContent = no injection (server also strips < >)
         const val = document.createElement('span'); val.className = 'lb-val';
-        val.textContent = fmtEY(row.engYears) + ' eng-yrs';
+        val.textContent = fmtEY(row.engYears);
         val.title = fmtTok(row.outputTokens) + ' output tokens' +
           (row.sources && row.sources.length ? ' · ' + row.sources.join(', ') : '');
         r.append(rank, name, val);
