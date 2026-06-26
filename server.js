@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getUsage } from './lib/usage.js';
 import { getLive } from './lib/live.js';
+import { record as recordFloor, getHistory, SAMPLE_MS } from './lib/history.js';
 import { installInfo } from './lib/install.js';
 import { identityFor, overrideFor, setOverride } from './lib/roster.js';
 import { getTranscript } from './lib/transcript.js';
@@ -150,6 +151,14 @@ const server = http.createServer((req, res) => {
     const query = q === -1 ? '' : req.url.slice(q + 1);
     if (pathname === '/api/state') {
       sendJSON(res, 200, buildState());
+      return;
+    }
+    // Floor recorder history — the time-series the Timeline view replays and
+    // charts. `?since=<ms>` returns only newer snapshots (cheap incremental
+    // refresh while the view is open).
+    if (pathname === '/api/history') {
+      const since = Number(new URLSearchParams(query).get('since')) || 0;
+      sendJSON(res, 200, getHistory(since || undefined));
       return;
     }
     // Read-only peek at the tail of a session's transcript (for the chat panel).
@@ -386,6 +395,20 @@ function openBrowser(url) {
   }
 }
 
+// Floor recorder: sample the live floor on a timer so the Timeline view can
+// replay the last few hours + chart concurrency, even while no browser is
+// polling. Fail-soft (a bad sample must never crash) and unref'd (never keeps
+// the process alive on its own — it only records while the server is up anyway).
+function sampleFloor() {
+  try {
+    // Drop user-hidden agents so they don't reappear on the replayed floor /
+    // concurrency chart / stats — same as office.js hides them from the live floor.
+    recordFloor(buildState().live.agents.filter((a) => !a.hidden));
+  } catch {
+    /* ignore — the next tick tries again */
+  }
+}
+
 server.listen(PORT, HOST, () => {
   // Warm the usage cache so the first request is fast.
   try {
@@ -393,6 +416,8 @@ server.listen(PORT, HOST, () => {
   } catch {
     /* ignore */
   }
+  sampleFloor(); // seed one snapshot so the timeline isn't empty for the first tick
+  setInterval(sampleFloor, SAMPLE_MS).unref();
   console.log(`\n  🏢  Agency is open for business.`);
   console.log(`      → http://${HOST}:${PORT}\n`);
   openBrowser(`http://${HOST}:${PORT}`);

@@ -9,6 +9,7 @@ import { initAudioControls } from './audio-controls.js';
 import { initUI } from './ui.js';
 import { mockEnabled, getMockState } from './mock.js';
 import { initChatPanel } from './chat-panel.js';
+import { initTimeline } from './timeline.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +18,7 @@ const labels = $('labels');
 initOffice(office, labels);
 initUI();
 initChatPanel(); // read-only "open agent's chat" peek panel (listens for agency:select)
+initTimeline(); // Timeline view: replay the last few hours + concurrency/wait stats
 
 // ---- assumptions (persisted) ---------------------------------------------
 
@@ -92,13 +94,19 @@ function onState() {
   // Bail if the server returned an error body instead of state.
   if (!STATE || !STATE.live || !Array.isArray(STATE.live.agents) || !STATE.usage) return;
   const { live, usage } = STATE;
+  // Publish the live floor so the Timeline view can restore it when leaving
+  // playback (it owns the canvas while window.agencyPlayback is set).
+  window.agencyLiveAgents = live.agents;
   // Drive the canvas office, but never let a renderer throw take down the data
   // panels — they read the same STATE independently. (Fail-soft charter: a
-  // broken render path shouldn't blank the whole dashboard.)
-  try {
-    setAgents(live.agents);
-  } catch (e) {
-    console.error('office render failed:', e);
+  // broken render path shouldn't blank the whole dashboard.) Skip while the
+  // Timeline view is replaying history so the live poll doesn't stomp the frame.
+  if (!window.agencyPlayback) {
+    try {
+      setAgents(live.agents);
+    } catch (e) {
+      console.error('office render failed:', e);
+    }
   }
 
   // ---- topbar headline metrics (truthful definitions) --------------------
@@ -953,34 +961,37 @@ bindSlider('sHrs', 'hrs', (v) => String(v));
 bindSlider('sDays', 'days', (v) => String(v));
 bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
 
-// ---- sidebar view toggle: Now (default) | Analytics ----------------------
+// ---- sidebar view toggle: Now (default) | Analytics | Timeline ------------
 // "Now" = current activity (live burn, generating count, working/idle split,
-// recent tool calls). "Analytics" = the relocated windowed/historical panels
-// (effective team size, eng-years, payroll-equiv + meter, model mix, depts,
-// daily). Default is Now. ponytail: persisted to localStorage; falls back to
-// in-memory if storage is unavailable (private mode / quota).
+// recent tool calls). "Analytics" = the windowed/historical panels (effective
+// team size, eng-years, payroll-equiv + meter, model mix, depts, daily).
+// "Timeline" = replay the last few hours of the floor + concurrency / wait
+// stats (timeline.js, driven via the agency:view event below). Default is Now.
+// ponytail: persisted to localStorage; falls back to in-memory if storage is
+// unavailable (private mode / quota).
 (function wireViewToggle() {
-  const nowBtn = $('vtNow');
-  const anaBtn = $('vtAnalytics');
-  const nowView = $('viewNow');
-  const anaView = $('viewAnalytics');
-  if (!nowBtn || !anaBtn || !nowView || !anaView) return;
+  const views = [
+    { key: 'now', btn: $('vtNow'), view: $('viewNow') },
+    { key: 'analytics', btn: $('vtAnalytics'), view: $('viewAnalytics') },
+    { key: 'timeline', btn: $('vtTimeline'), view: $('viewTimeline') },
+  ];
+  if (views.some((v) => !v.btn || !v.view)) return;
 
   function readPref() {
     try {
-      return localStorage.getItem('agency.view') === 'analytics' ? 'analytics' : 'now';
+      const v = localStorage.getItem('agency.view');
+      return views.some((x) => x.key === v) ? v : 'now';
     } catch {
       return 'now';
     }
   }
   function setView(view) {
-    const analytics = view === 'analytics';
-    nowView.classList.toggle('hidden', analytics);
-    anaView.classList.toggle('hidden', !analytics);
-    nowBtn.classList.toggle('active', !analytics);
-    anaBtn.classList.toggle('active', analytics);
-    nowBtn.setAttribute('aria-selected', String(!analytics));
-    anaBtn.setAttribute('aria-selected', String(analytics));
+    for (const v of views) {
+      const on = v.key === view;
+      v.view.classList.toggle('hidden', !on);
+      v.btn.classList.toggle('active', on);
+      v.btn.setAttribute('aria-selected', String(on));
+    }
     try {
       localStorage.setItem('agency.view', view);
     } catch {
@@ -988,13 +999,14 @@ bindSlider('sSal', 'sal', (v) => '$' + Math.round(v / 1000) + 'k');
     }
     // Analytics has canvases (heads, daily) sized to clientWidth — they render to
     // 0px while hidden, so re-render on reveal to size them correctly.
-    if (analytics && STATE) {
+    if (view === 'analytics' && STATE) {
       renderManpower();
       renderDaily(STATE.usage);
     }
+    // Let timeline.js enter/leave (it owns the canvas during playback).
+    window.dispatchEvent(new CustomEvent('agency:view', { detail: { view } }));
   }
-  nowBtn.addEventListener('click', () => setView('now'));
-  anaBtn.addEventListener('click', () => setView('analytics'));
+  for (const v of views) v.btn.addEventListener('click', () => setView(v.key));
   setView(readPref());
 })();
 

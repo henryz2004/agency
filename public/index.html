@@ -69,6 +69,7 @@
       <div class="view-toggle" id="viewToggle" role="tablist" aria-label="Sidebar view">
         <button type="button" class="vt-btn active" id="vtNow" role="tab" aria-selected="true">Now</button>
         <button type="button" class="vt-btn" id="vtAnalytics" role="tab" aria-selected="false">Analytics</button>
+        <button type="button" class="vt-btn" id="vtTimeline" role="tab" aria-selected="false">Timeline</button>
       </div>
 
       <!-- ===== NOW: live, current-activity view (default) ===== -->
@@ -169,6 +170,35 @@
         <div class="ledger" id="ledger"></div>
       </details>
       </div><!-- /view-analytics -->
+
+      <!-- ===== TIMELINE: replay the last few hours + concurrency / wait stats ===== -->
+      <div class="view-timeline hidden" id="viewTimeline">
+        <div class="card tl-transport-card">
+          <div class="card-title">Playback <span class="card-title-hint" id="tlTime">LIVE</span></div>
+          <div class="tl-transport">
+            <button type="button" class="tl-btn" id="tlPlay" title="Play / pause">▶</button>
+            <input type="range" class="tl-scrub" id="tlScrub" min="0" max="0" value="0" step="1" aria-label="Scrub through history" />
+            <button type="button" class="tl-btn tl-speed" id="tlSpeed" title="Playback speed">2×</button>
+            <button type="button" class="tl-btn tl-live" id="tlLive" title="Jump back to live">● LIVE</button>
+          </div>
+          <div class="card-note" id="tlNote">Collecting activity… leave the dashboard open.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Concurrent agents <span class="card-title-hint" id="tlChartHint">last 6h</span></div>
+          <canvas id="tlChart" class="tl-chart"></canvas>
+          <div class="tl-legend">
+            <span><i class="tl-sw tl-sw-working"></i>generating</span>
+            <span><i class="tl-sw tl-sw-shell"></i>running cmd</span>
+            <span><i class="tl-sw tl-sw-idle"></i>idle</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Per-agent <span class="card-title-hint">uptime &amp; wait</span></div>
+          <div id="tlStats" class="tl-stats"></div>
+        </div>
+      </div><!-- /view-timeline -->
     </aside>
 
     <div id="panelHandle" class="panel-handle" title="Show stats">📊</div>
