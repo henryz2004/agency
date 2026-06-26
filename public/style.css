@@ -492,6 +492,26 @@ html, body {
 .lb-body button:disabled { opacity: 0.5; cursor: default; }
 .lb-body button.lb-danger:hover { border-color: var(--pink); color: var(--pink); }
 .lb-msg { color: var(--muted); font: 11px var(--mono); min-height: 14px; margin-top: 6px; }
+
+/* First-run welcome */
+.lb-field { margin: 0 0 12px; }
+.lb-field label { display: block; color: var(--muted); font: 11px var(--mono); letter-spacing: 0.5px; margin-bottom: 6px; }
+.lb-field input {
+  width: 100%; box-sizing: border-box;
+  background: var(--card2); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--ink); font: 14px var(--mono); padding: 10px 12px;
+}
+.lb-field input:focus { outline: none; border-color: var(--cyan); }
+.lb-check { display: flex; gap: 9px; align-items: flex-start; cursor: pointer; margin: 0 0 10px; color: var(--ink); font: 13px/1.45 var(--mono); }
+.lb-check input { margin-top: 2px; accent-color: var(--gold); }
+.lb-check b { color: var(--gold); }
+.lb-fine { color: var(--muted); font-size: 11px; }
+.lb-welcome .lb-form { margin-top: 4px; }
+.lb-welcome .lb-form button {
+  flex: 1; padding: 11px 14px; font-size: 13px; font-weight: 600;
+  background: var(--gold); color: #1a1205; border-color: var(--gold);
+}
+.lb-welcome .lb-form button:hover { color: #000; border-color: var(--gold); filter: brightness(1.08); }
 .lb-you { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 .lb-you-handle { color: var(--gold); font: 15px var(--mono); }
 .lb-you-rank { color: var(--ink); font: 13px var(--mono); }

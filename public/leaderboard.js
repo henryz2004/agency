@@ -20,10 +20,12 @@ const LEADERBOARD_API =
   'https://agency-leaderboard.henryz2004.workers.dev';
 
 const KNOWN_SOURCES = ['claude', 'codex', 'opencode'];
-const LS = { id: 'agency.lb.installId', handle: 'agency.lb.handle', opted: 'agency.lb.optedIn' };
+const LS = { id: 'agency.lb.installId', handle: 'agency.lb.handle', opted: 'agency.lb.optedIn', seen: 'agency.lb.seen' };
 const $ = (id) => document.getElementById(id);
 const RESYNC_MS = 5 * 60 * 1000; // leaderboard auto-resync cadence (declared up here:
                                  // init() runs at load and reaches startAutoSync synchronously).
+
+let welcomeMode = false; // true → render the first-run welcome instead of the leaderboard
 
 if (LEADERBOARD_API) init();
 
@@ -31,15 +33,27 @@ function init() {
   const btn = $('leaderboardBtn');
   if (!btn) return;
   btn.hidden = false;
-  btn.addEventListener('click', open);
+  btn.addEventListener('click', () => open()); // trophy → leaderboard view (not the welcome)
+  greet();
+  // The welcome can't be bypassed (no ✕/Escape/click-away) — "Enter" is the only way out.
   $('lbClose') && $('lbClose').addEventListener('click', close);
   $('lbOverlay') && $('lbOverlay').addEventListener('click', (e) => {
-    if (e.target.id === 'lbOverlay') close();
+    if (e.target.id === 'lbOverlay' && !welcomeMode) close();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && $('lbOverlay') && !$('lbOverlay').classList.contains('hidden')) close();
+    if (e.key === 'Escape' && !welcomeMode && $('lbOverlay') && !$('lbOverlay').classList.contains('hidden')) close();
   });
   startAutoSync();
+  // First-run welcome: greet new users, take their name, offer the leaderboard.
+  // Stops once they finish setup (opted) or dismiss it (seen).
+  if (localStorage.getItem(LS.opted) !== '1' && localStorage.getItem(LS.seen) !== '1') open(true);
+}
+
+// Personalize the topbar once we know the user's name.
+function greet() {
+  const name = localStorage.getItem(LS.handle);
+  const el = document.querySelector('.brand-sub');
+  if (name && el) el.textContent = `welcome, ${name}`;
 }
 
 // Keep your score current without a manual "update" — re-submit on load and on a
@@ -62,8 +76,21 @@ function startAutoSync() {
   setInterval(tick, RESYNC_MS);
 }
 
-function open() { $('lbOverlay').classList.remove('hidden'); render(); }
-function close() { $('lbOverlay').classList.add('hidden'); }
+function open(welcome = false) { welcomeMode = welcome; $('lbOverlay').classList.remove('hidden'); render(); }
+function close() { $('lbOverlay').classList.add('hidden'); localStorage.setItem(LS.seen, '1'); }
+
+// Swap the modal header between the welcome and the leaderboard framings.
+function setHead(mode) {
+  const title = $('lbTitle');
+  const sub = document.querySelector('.lb-sub');
+  if (mode === 'welcome') {
+    if (title) title.textContent = '👋 Welcome to Agency';
+    if (sub) { sub.hidden = false; sub.textContent = 'Your AI workforce, visualized.'; }
+  } else {
+    if (title) title.textContent = '🏆 Leaderboard';
+    if (sub) { sub.hidden = false; sub.textContent = 'Standardized engineer-years shipped. Same formula for everyone, no sliders.'; }
+  }
+}
 
 // Stable anonymous identity (so re-submits update your row, not duplicate it).
 function installId() {
@@ -113,12 +140,77 @@ async function render() {
   body.innerHTML = '';
   const opted = localStorage.getItem(LS.opted) === '1';
   const stats = await localStats(); // { out, sources } — one local snapshot for preview + submit
+  const closeBtn = $('lbClose');
+  if (welcomeMode && !opted) { // first-run: name + opt-in, no ✕ (can't be bypassed)
+    setHead('welcome');
+    if (closeBtn) closeBtn.hidden = true;
+    body.appendChild(welcomeBlock(stats));
+    return;
+  }
+  if (closeBtn) closeBtn.hidden = false;
+  setHead('leaderboard');
   body.appendChild(opted ? statusBlock(stats) : optInBlock(stats));
   const list = document.createElement('div');
   list.className = 'lb-list';
   list.textContent = 'Loading…';
   body.appendChild(list);
   loadList(list);
+}
+
+// First-run welcome: greet, take a display name, and offer leaderboard opt-in
+// (checked by default — uncheck to just set a name and enter).
+function welcomeBlock(stats) {
+  const wrap = document.createElement('div');
+  wrap.className = 'lb-welcome';
+  wrap.innerHTML = `
+    <div class="lb-field">
+      <label for="lbHandle">What should we call you?</label>
+      <input id="lbHandle" type="text" maxlength="32" placeholder="your name" autocomplete="off" />
+    </div>
+    <label class="lb-check">
+      <input id="lbOptCheck" type="checkbox" checked />
+      <span>Join the public <b>leaderboard</b>, ranked by engineer-years</span>
+    </label>
+    <p class="lb-preview">Your score so far: <b></b></p>
+    <p class="lb-fine">Only your name + score are shared, never your code.</p>
+    <div class="lb-form">
+      <button id="lbStart" type="button">Enter the office →</button>
+    </div>
+    <div id="lbMsg" class="lb-msg"></div>`;
+  const preview = wrap.querySelector('.lb-preview');
+  preview.querySelector('b').textContent = fmtEngTime(standardEngYears(stats.out));
+  const input = wrap.querySelector('#lbHandle');
+  input.value = localStorage.getItem(LS.handle) || '';
+  const check = wrap.querySelector('#lbOptCheck');
+  const start = wrap.querySelector('#lbStart');
+  const msg = wrap.querySelector('#lbMsg');
+  const syncPreview = () => { preview.style.display = check.checked ? '' : 'none'; };
+  syncPreview();
+  check.addEventListener('change', syncPreview);
+  const go = async () => {
+    const handle = input.value.trim();
+    if (handle) { localStorage.setItem(LS.handle, handle); greet(); }
+    if (check.checked) {
+      if (!handle) { msg.textContent = 'Add a name to join the leaderboard.'; return; }
+      start.disabled = true; msg.textContent = 'Joining…';
+      const res = await submitScore(handle, stats);
+      start.disabled = false;
+      if (res && res.ok) {
+        localStorage.setItem(LS.opted, '1');
+        localStorage.setItem(LS.seen, '1');
+        welcomeMode = false;
+        render(); // show their rank + the live board as the payoff
+        return;
+      }
+      if (res && res.error === 'handle taken') { msg.textContent = 'That name is taken, try another.'; return; }
+      msg.textContent = 'Could not join' + (res && res._error ? ` (${res._error})` : '') + '.';
+      return;
+    }
+    close(); // skipped the board — just enter (close() marks seen)
+  };
+  start.addEventListener('click', go);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  return wrap;
 }
 
 // Submit the standardized score. Server derives eng-years from outputTokens.
@@ -144,7 +236,7 @@ function optInBlock(stats) {
   const wrap = document.createElement('div');
   wrap.className = 'lb-optin';
   wrap.innerHTML = `
-    <p class="lb-note">Share your standardized <b>engineer-years</b> — counted <b>since you installed Agency</b> —
+    <p class="lb-note">Share your standardized <b>engineer-years</b>, counted <b>since you installed Agency</b>,
     on a public leaderboard. Only a display name + that one number are sent; <b>never</b> your code, transcripts, or repo names.</p>
     <p class="lb-preview">Your standardized score since install: <b></b></p>
     <div class="lb-form">
@@ -168,7 +260,7 @@ function optInBlock(stats) {
       localStorage.setItem(LS.opted, '1');
       render();
     } else if (res && res.error === 'handle taken') {
-      msg.textContent = 'That name is taken — try another.';
+      msg.textContent = 'That name is taken, try another.';
     } else {
       msg.textContent = 'Could not submit' + (res && res._error ? ` (${res._error})` : '') + '.';
     }
@@ -227,7 +319,7 @@ async function loadList(list) {
     return;
   }
   if (!data.top.length) {
-    list.textContent = 'No one has joined yet — be the first.';
+    list.textContent = 'No one has joined yet. Be the first.';
     return;
   }
   list.innerHTML = '';
