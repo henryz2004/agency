@@ -1,6 +1,6 @@
 {
   "name": "@henryz2004/agency",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "description": "A live pixel-art office sim of your Claude Code, Codex, and opencode workforce.",
   "license": "MIT",
